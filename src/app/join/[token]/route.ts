@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { sql } from "@/lib/db";
 import { SESSION_COOKIE, sealSession } from "@/lib/auth";
+import { configProblems } from "@/lib/env";
 
 /**
  * Invite links bind a browser to a coder identity. The token is a bearer
@@ -12,6 +13,11 @@ export async function GET(
   { params }: { params: Promise<{ token: string }> },
 ) {
   const { token } = await params;
+
+  // Without AUTH_SECRET the cookie cannot be signed. Send the visitor to the
+  // home page, which explains exactly what is missing.
+  if (configProblems().length > 0) redirect("/");
+
   const rows = await sql<{ id: string }[]>`
     SELECT id FROM coders WHERE token = ${token} AND active = true
   `;

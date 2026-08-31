@@ -1,24 +1,38 @@
 import postgres from "postgres";
+import { DATABASE_URL_NAMES, isLocalUrl, resolveDatabaseUrl } from "./env";
 
-// postgres.js talks to both a local Docker Postgres and Neon's *pooled*
+// postgres.js talks to both a local Docker Postgres and a hosted pooled
 // endpoint, so dev and production share one code path.
 function connect(): postgres.Sql {
-  const url = process.env.POSTGRES_URL ?? process.env.DATABASE_URL;
-  if (!url) {
+  const resolved = resolveDatabaseUrl();
+  if (!resolved) {
     throw new Error(
-      "POSTGRES_URL is not set. Copy .env.example to .env.local and fill it in " +
-        "(local Docker) or paste the pooled connection string from the Neon " +
-        "integration (production).",
+      "No database connection string found. Set one of " +
+        `${DATABASE_URL_NAMES.join(", ")} (a namespaced form such as ` +
+        "`qual_POSTGRES_URL` is also accepted). Locally, copy .env.example to " +
+        ".env.local; on Vercel, add the Neon integration and redeploy so the " +
+        "variables reach the running app.",
     );
   }
-  const local = /@(localhost|127\.0\.0\.1|host\.docker\.internal)[:/]/.test(url);
-  return postgres(url, {
+
+  if (!resolved.local && !resolved.pooled) {
+    // Not fatal -- it works, and at this scale it will probably keep working --
+    // but the direct endpoint is the wrong one to hand to serverless functions.
+    console.warn(
+      `[db] ${resolved.key} points at a direct (unpooled) endpoint. On serverless ` +
+        "hosting prefer the pooled connection string, whose host contains `-pooler`.",
+    );
+  }
+
+  return postgres(resolved.url, {
     max: 1,
     idle_timeout: 20,
     // Pooled connections run pgbouncer in transaction mode, which cannot
     // support session-level prepared statements.
     prepare: false,
-    ssl: local ? false : "require",
+    // `true` verifies the certificate; hosted Postgres presents a valid one.
+    // Unencrypted local Docker has no certificate to verify.
+    ssl: resolved.local ? false : true,
   });
 }
 
@@ -27,6 +41,18 @@ function connect(): postgres.Sql {
 const g = globalThis as unknown as { __qualcodeSql?: postgres.Sql };
 export const sql: postgres.Sql = g.__qualcodeSql ?? connect();
 if (process.env.NODE_ENV !== "production") g.__qualcodeSql = sql;
+
+/** Where the current connection points, with credentials removed. Used by the
+ *  setup screens so a misconfigured deployment says so plainly. */
+export function describeConnection(): string {
+  const resolved = resolveDatabaseUrl();
+  if (!resolved) return "not configured";
+  const host = resolved.url.replace(/^[^:]+:\/\/[^@]*@/, "").split(/[/?]/)[0];
+  const kind = resolved.local ? "local" : resolved.pooled ? "pooled" : "direct";
+  return `${host} (${kind}, via ${resolved.key})`;
+}
+
+export { isLocalUrl };
 
 /**
  * postgres.js's JSONValue type is stricter than the interfaces we store in

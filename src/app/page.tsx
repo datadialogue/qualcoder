@@ -1,17 +1,23 @@
 import Link from "next/link";
 import { currentCoder } from "@/lib/auth";
 import { sql } from "@/lib/db";
+import { configProblems } from "@/lib/env";
 import { getRoundProgress, getRoundSummaries } from "@/lib/queries";
 import { SignedOut } from "@/components/SignedOut";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
+  // Checked before anything touches the database, so a misconfigured deployment
+  // explains itself instead of returning an opaque 500.
+  const problems = configProblems();
+  if (problems.length > 0) return <SetupNeeded problems={problems} />;
+
   let coder;
   try {
     coder = await currentCoder();
   } catch (err) {
-    return <SetupNeeded error={err instanceof Error ? err.message : String(err)} />;
+    return <SetupNeeded problems={[err instanceof Error ? err.message : String(err)]} />;
   }
   if (!coder) return <SignedOut />;
 
@@ -210,12 +216,19 @@ function Callout({
   );
 }
 
-function SetupNeeded({ error }: { error: string }) {
+function SetupNeeded({ problems }: { problems: string[] }) {
   return (
     <div className="mx-auto max-w-2xl px-4 py-16">
       <div className="panel p-6">
-        <h1 className="text-[15px] font-semibold mb-2">Not connected to the database</h1>
-        <p className="muted text-[13px] mb-3">{error}</p>
+        <h1 className="text-[15px] font-semibold mb-2">
+          {problems.length === 1 ? "Configuration problem" : "Configuration problems"}
+        </h1>
+        <ul className="muted text-[13px] mb-4 space-y-2 list-disc ml-5">
+          {problems.map((p) => (
+            <li key={p}>{p}</li>
+          ))}
+        </ul>
+        <h2 className="text-[13px] font-semibold mb-1">First-time setup</h2>
         <ol className="muted text-[13px] list-decimal ml-5 space-y-1">
           <li>
             Copy <code>.env.example</code> to <code>.env.local</code> and set{" "}

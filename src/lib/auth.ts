@@ -1,13 +1,22 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { sql } from "./db";
+import { readEnv } from "./env";
 import type { Coder } from "./types";
 
 export const SESSION_COOKIE = "qc_session";
 
 function secret(): string {
-  const s = process.env.AUTH_SECRET;
-  if (!s) throw new Error("AUTH_SECRET is not set. See .env.example.");
+  // Accepts a namespaced form too (e.g. `qual_AUTH_SECRET`), matching how the
+  // database variables are resolved.
+  const s = readEnv("AUTH_SECRET");
+  if (!s) {
+    throw new Error(
+      "AUTH_SECRET is not set, so sessions cannot be signed. Generate one with " +
+        "`node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\"` " +
+        "and add it to .env.local locally, or to the project's environment variables when deployed.",
+    );
+  }
   return s;
 }
 

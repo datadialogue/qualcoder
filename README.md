@@ -78,16 +78,33 @@ npm run dev:seed
 1. Push the repository to GitHub and import it in Vercel.
 2. Add the **Neon** integration from the Vercel Marketplace (Vercel's own Postgres product was
    retired in 2025; Neon is its successor and has a free tier that is far more than enough here).
-3. Set environment variables:
-   - `POSTGRES_URL` — the **pooled** connection string from Neon, the one with `-pooler` in the
-     host. The direct URL will exhaust connections under serverless.
-   - `AUTH_SECRET` — 32 random bytes.
-4. Run the migration and import against the production database from your machine:
+   It injects a block of variables — `POSTGRES_URL`, `DATABASE_URL`, `PGHOST` and so on.
+3. Add `AUTH_SECRET` yourself; the integration does not provide one.
    ```bash
-   POSTGRES_URL="postgres://…-pooler…" npm run db:migrate
-   POSTGRES_URL="postgres://…-pooler…" npm run import -- "Qual Analysis - accounts_tidy.csv"
-   POSTGRES_URL="postgres://…-pooler…" npm run seed:lead -- --name="Your Name" --url=https://your-app.vercel.app
+   node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
    ```
+4. Prepare the database from your machine, using the pooled connection string:
+   ```bash
+   POSTGRES_URL="postgres://…-pooler….neon.tech/neondb?sslmode=require" npm run db:migrate
+   POSTGRES_URL="…" npm run seed:codebook
+   POSTGRES_URL="…" npm run import -- "Qual Analysis - accounts_tidy.csv"
+   POSTGRES_URL="…" npm run seed:lead -- --name="Your Name" --url=https://your-app.vercel.app
+   ```
+5. Redeploy, then open the invite link the last command printed.
+
+### Variable names
+
+The app does not insist on one spelling. It looks for a connection string under
+`POSTGRES_URL`, then `DATABASE_URL`, then the unpooled variants, and accepts a namespaced
+form of any of them — so if the Vercel integration is configured with a prefix, both
+`qual_POSTGRES_URL` and `qual_AUTH_SECRET` are picked up with no code change. Pooled endpoints
+are preferred automatically; if only a direct one is available the app uses it and says so.
+
+If something is missing, the home page lists exactly what rather than returning a 500.
+
+**One trap worth knowing.** Within a single `.env` file, a later definition of a name overrides
+an earlier one. Pasting Neon's block underneath an existing `POSTGRES_URL` therefore silently
+switches you to Neon — which is fine, but not always what you meant. Define each name once.
 
 Alternatively add coders from the **Admin** page once you are signed in, and copy their invite
 links from there.
