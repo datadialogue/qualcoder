@@ -6,6 +6,8 @@ export interface AdjUnit {
   id: string;
   external_id: string;
   text: string;
+  /** Read-only surrounding text, e.g. the post a comment replies to. */
+  context: Array<{ label: string; text: string }>;
   /** Each coder's annotations on this unit. */
   byCoder: Array<{
     coderId: string;
@@ -203,6 +205,16 @@ export function Adjudicator({ roundId, units, codes }: Props) {
             contested: {unit.contested.map((id) => codeById.get(id)?.name).filter(Boolean).join(", ")}
           </span>
         </div>
+        {unit.context.map((c, i) => (
+          <div
+            key={i}
+            className="text-[12px] px-3 py-1.5 mb-2 rounded"
+            style={{ background: "var(--panel)", borderLeft: "3px solid var(--ink-faint)" }}
+          >
+            {c.label && <span className="label mr-1">{c.label}</span>}
+            <span className="muted whitespace-pre-line line-clamp-3">{c.text}</span>
+          </div>
+        ))}
         <p className="coding-text">{unit.text}</p>
       </article>
 

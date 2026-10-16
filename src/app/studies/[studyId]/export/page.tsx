@@ -5,10 +5,11 @@ import { ExportPanel } from "@/components/ExportPanel";
 
 export const dynamic = "force-dynamic";
 
-export default async function ExportPage() {
+export default async function ExportPage({ params }: { params: Promise<{ studyId: string }> }) {
+  const { studyId } = await params;
   const coder = await currentCoder();
   if (!coder) return <SignedOut />;
-  const [rounds, coders] = await Promise.all([getRoundSummaries(), getCoders()]);
+  const [rounds, coders] = await Promise.all([getRoundSummaries(studyId), getCoders()]);
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
@@ -21,6 +22,7 @@ export default async function ExportPage() {
       </header>
 
       <ExportPanel
+        studyId={studyId}
         rounds={rounds.map((r) => ({
           id: r.id,
           label: `Round ${r.number}${r.name ? ` · ${r.name}` : ""} (${r.unit_count} units)`,

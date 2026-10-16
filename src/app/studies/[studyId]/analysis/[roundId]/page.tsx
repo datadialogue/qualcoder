@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { currentCoder } from "@/lib/auth";
 import { sql } from "@/lib/db";
-import { getRound } from "@/lib/queries";
+import { getStudyRound } from "@/lib/queries";
 import { computeReliability, type AnnotationRow, type ProgressRow } from "@/lib/reliability";
 import { SignedOut } from "@/components/SignedOut";
 import { Metric, StatCell, agreementLabel } from "@/components/Stat";
@@ -13,15 +13,16 @@ export default async function AnalysisPage({
   params,
   searchParams,
 }: {
-  params: Promise<{ roundId: string }>;
+  params: Promise<{ studyId: string; roundId: string }>;
   searchParams: Promise<{ coders?: string }>;
 }) {
-  const { roundId } = await params;
+  const { studyId, roundId } = await params;
+  const base = `/studies/${studyId}`;
   const { coders: coderParam } = await searchParams;
   const viewer = await currentCoder();
   if (!viewer) return <SignedOut />;
 
-  const round = await getRound(roundId);
+  const round = await getStudyRound(studyId, roundId);
   if (!round) notFound();
 
   const [assigned, codes, annotations, progress] = await Promise.all([
@@ -32,6 +33,7 @@ export default async function AnalysisPage({
     sql<{ id: string; name: string; theme_name: string | null; color: string }[]>`
       SELECT DISTINCT c.id, c.name, t.name AS theme_name, c.color
       FROM codes c LEFT JOIN themes t ON t.id = c.theme_id
+      WHERE c.study_id = ${studyId}
       ORDER BY t.name NULLS LAST, c.name
     `,
     sql<AnnotationRow[]>`
@@ -64,7 +66,7 @@ export default async function AnalysisPage({
     <div className="mx-auto max-w-6xl px-4 py-8">
       <header className="mb-6">
         <div className="flex items-center gap-2 mb-1">
-          <Link href={`/rounds/${roundId}`} className="text-[13px] muted">
+          <Link href={`${base}/rounds/${roundId}`} className="text-[13px] muted">
             Round {round.number}
             {round.name && ` · ${round.name}`}
           </Link>
@@ -90,7 +92,7 @@ export default async function AnalysisPage({
           return (
             <Link
               key={c.id}
-              href={`/analysis/${roundId}${next.length ? `?coders=${next.join(",")}` : "?coders=none"}`}
+              href={`${base}/analysis/${roundId}${next.length ? `?coders=${next.join(",")}` : "?coders=none"}`}
               className="chip"
               style={
                 on
@@ -103,7 +105,7 @@ export default async function AnalysisPage({
           );
         })}
         {requested && (
-          <Link href={`/analysis/${roundId}`} className="chip faint">
+          <Link href={`${base}/analysis/${roundId}`} className="chip faint">
             reset
           </Link>
         )}
@@ -287,7 +289,7 @@ export default async function AnalysisPage({
             </p>
           </div>
           {viewer.role === "lead" && report.disagreements.length > 0 && (
-            <Link href={`/adjudicate/${roundId}`} className="btn btn-primary text-[12px] ml-auto">
+            <Link href={`${base}/adjudicate/${roundId}`} className="btn btn-primary text-[12px] ml-auto">
               Adjudicate
             </Link>
           )}

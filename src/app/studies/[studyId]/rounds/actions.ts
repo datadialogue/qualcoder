@@ -18,6 +18,11 @@ const num = (fd: FormData, k: string, fallback: number) => {
   return Number.isFinite(v) ? v : fallback;
 };
 
+async function studyOfRound(roundId: string): Promise<string | null> {
+  const rows = await sql<{ study_id: string }[]>`SELECT study_id FROM rounds WHERE id = ${roundId}`;
+  return rows[0]?.study_id ?? null;
+}
+
 /**
  * Draws the sample once and stores it. Everything downstream reads
  * `round_units`, which is what makes the set identical for every coder.
@@ -25,6 +30,10 @@ const num = (fd: FormData, k: string, fallback: number) => {
 export async function createRound(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
   const denied = await leadGuard();
   if (denied) return denied;
+
+  const studyId = str(fd, "study_id");
+  const study = await sql<{ id: string }[]>`SELECT id FROM studies WHERE id = ${studyId}`;
+  if (study.length === 0) return { error: "That study no longer exists." };
 
   const coderIds = fd.getAll("coder_ids").map(String).filter(Boolean);
   if (coderIds.length === 0) {
@@ -63,20 +72,25 @@ export async function createRound(_prev: ActionResult, fd: FormData): Promise<Ac
 
   if (reuseRoundId) {
     const rows = await sql<{ unit_id: string }[]>`
-      SELECT unit_id FROM round_units WHERE round_id = ${reuseRoundId} ORDER BY position
+      SELECT ru.unit_id FROM round_units ru JOIN rounds r ON r.id = ru.round_id
+      WHERE ru.round_id = ${reuseRoundId} AND r.study_id = ${studyId}
+      ORDER BY ru.position
     `;
     if (rows.length === 0) return { error: "That round has no sample to reuse." };
     unitIds = rows.map((r) => r.unit_id);
   } else {
-    const units = await sql<SampleInput[]>`SELECT id, meta FROM units`;
+    const units = await sql<SampleInput[]>`SELECT id, meta FROM units WHERE study_id = ${studyId}`;
     if (units.length === 0) {
-      return { error: "No units imported yet. Run the CSV import first." };
+      return { error: "This study has no units yet. Import data on its settings page first." };
     }
     const prior = excludePriorRounds
       ? new Set(
-          (await sql<{ unit_id: string }[]>`SELECT DISTINCT unit_id FROM round_units`).map(
-            (r) => r.unit_id,
-          ),
+          (
+            await sql<{ unit_id: string }[]>`
+              SELECT DISTINCT ru.unit_id FROM round_units ru JOIN rounds r ON r.id = ru.round_id
+              WHERE r.study_id = ${studyId}
+            `
+          ).map((r) => r.unit_id),
         )
       : new Set<string>();
 
@@ -99,11 +113,11 @@ export async function createRound(_prev: ActionResult, fd: FormData): Promise<Ac
   let roundId = "";
   await sql.begin(async (tx) => {
     const [{ next }] = await tx<{ next: number }[]>`
-      SELECT COALESCE(max(number), 0) + 1 AS next FROM rounds
+      SELECT COALESCE(max(number), 0) + 1 AS next FROM rounds WHERE study_id = ${studyId}
     `;
     const [round] = await tx<{ id: string }[]>`
-      INSERT INTO rounds (number, name, status, sampling, seed, overlap_mode, opened_at)
-      VALUES (${next}, ${str(fd, "name")}, 'open', ${json(config)}, ${seed},
+      INSERT INTO rounds (study_id, number, name, status, sampling, seed, overlap_mode, opened_at)
+      VALUES (${studyId}, ${next}, ${str(fd, "name")}, 'open', ${json(config)}, ${seed},
               ${overlapMode}, now())
       RETURNING id
     `;
@@ -138,8 +152,8 @@ export async function createRound(_prev: ActionResult, fd: FormData): Promise<Ac
   });
 
   revalidatePath("/");
-  revalidatePath("/rounds");
-  redirect(`/rounds/${roundId}`);
+  revalidatePath("/studies/[studyId]", "layout");
+  redirect(`/studies/${studyId}/rounds/${roundId}`);
 }
 
 export async function setRoundStatus(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
@@ -148,6 +162,8 @@ export async function setRoundStatus(_prev: ActionResult, fd: FormData): Promise
   const id = str(fd, "id");
   const status = str(fd, "status");
   if (!["draft", "open", "closed"].includes(status)) return { error: "Unknown status." };
+  const studyId = await studyOfRound(id);
+  if (!studyId) return { error: "Round not found." };
 
   if (status === "closed") {
     // Freeze the codebook as it stood, so a closed round stays interpretable
@@ -156,6 +172,7 @@ export async function setRoundStatus(_prev: ActionResult, fd: FormData): Promise
       SELECT c.id, c.name, c.definition, c.inclusion, c.exclusion, c.example, c.color,
              c.archived, t.name AS theme_name
       FROM codes c LEFT JOIN themes t ON t.id = c.theme_id
+      WHERE c.study_id = ${studyId}
       ORDER BY t.position NULLS LAST, c.position
     `;
     await sql`
@@ -170,8 +187,7 @@ export async function setRoundStatus(_prev: ActionResult, fd: FormData): Promise
       WHERE id = ${id}
     `;
   }
-  revalidatePath("/rounds");
-  revalidatePath(`/rounds/${id}`);
+  revalidatePath("/studies/[studyId]", "layout");
   return { ok: `Round marked ${status}.` };
 }
 
@@ -179,8 +195,10 @@ export async function renameRound(_prev: ActionResult, fd: FormData): Promise<Ac
   const denied = await leadGuard();
   if (denied) return denied;
   const id = str(fd, "id");
+  const studyId = await studyOfRound(id);
+  if (!studyId) return { error: "Round not found." };
   await sql`UPDATE rounds SET name = ${str(fd, "name")} WHERE id = ${id}`;
-  revalidatePath(`/rounds/${id}`);
+  revalidatePath("/studies/[studyId]", "layout");
   return { ok: "Renamed." };
 }
 
@@ -192,8 +210,8 @@ export async function addCoders(_prev: ActionResult, fd: FormData): Promise<Acti
   const coderIds = fd.getAll("coder_ids").map(String).filter(Boolean);
   if (coderIds.length === 0) return { error: "Pick at least one coder to add." };
 
-  const round = (await sql<{ overlap_mode: string; seed: string }[]>`
-    SELECT overlap_mode, seed FROM rounds WHERE id = ${roundId}
+  const round = (await sql<{ overlap_mode: string; seed: string; study_id: string }[]>`
+    SELECT overlap_mode, seed, study_id FROM rounds WHERE id = ${roundId}
   `)[0];
   if (!round) return { error: "Round not found." };
   if (round.overlap_mode !== "full") {
@@ -233,7 +251,7 @@ export async function addCoders(_prev: ActionResult, fd: FormData): Promise<Acti
     }
   });
 
-  revalidatePath(`/rounds/${roundId}`);
+  revalidatePath("/studies/[studyId]", "layout");
   return { ok: `Added ${coderIds.length} coder(s).` };
 }
 
@@ -241,6 +259,8 @@ export async function deleteRound(_prev: ActionResult, fd: FormData): Promise<Ac
   const denied = await leadGuard();
   if (denied) return denied;
   const id = str(fd, "id");
+  const studyId = await studyOfRound(id);
+  if (!studyId) return { error: "Round not found." };
   const [{ n }] = await sql<{ n: number }[]>`
     SELECT count(*)::int AS n FROM annotations WHERE round_id = ${id}
   `;
@@ -248,6 +268,6 @@ export async function deleteRound(_prev: ActionResult, fd: FormData): Promise<Ac
     return { error: `This round holds ${n} annotation(s). Type "delete" to confirm.` };
   }
   await sql`DELETE FROM rounds WHERE id = ${id}`;
-  revalidatePath("/rounds");
-  redirect("/rounds");
+  revalidatePath("/studies/[studyId]", "layout");
+  redirect(`/studies/${studyId}/rounds`);
 }

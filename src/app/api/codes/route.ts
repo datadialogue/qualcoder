@@ -1,12 +1,6 @@
 import { sql } from "@/lib/db";
 import { coderOrUnauthorized } from "@/lib/auth";
-
-// Same palette the codebook page uses, so codes made mid-coding do not look
-// out of place next to the ones the lead created.
-const PALETTE = [
-  "#2f6f5e", "#8c5a2b", "#3b5f9e", "#8a3d6b", "#6b6a2f",
-  "#2e6f7a", "#94472f", "#5a4a8c", "#3f7a3f", "#7a3f52",
-];
+import { pickColor } from "@/lib/palette";
 
 /**
  * Creates a code from inside the coding workspace.
@@ -16,12 +10,16 @@ const PALETTE = [
  * towards misapplying an existing code instead. Codes made this way are marked
  * `provisional` and attributed to their author so the lead can review, rename
  * or merge them before the next round.
+ *
+ * The code joins the codebook of the round's study, and only a coder on that
+ * round may add one.
  */
 export async function POST(request: Request) {
   const auth = await coderOrUnauthorized();
   if (auth.response) return auth.response;
 
   const body = (await request.json()) as {
+    roundId?: string;
     name?: string;
     themeId?: string | null;
     definition?: string;
@@ -34,6 +32,22 @@ export async function POST(request: Request) {
   if (name.length > 120) {
     return Response.json({ error: "That name is too long (120 characters max)." }, { status: 400 });
   }
+  if (!body.roundId) {
+    return Response.json({ error: "roundId is required." }, { status: 400 });
+  }
+
+  const round = await sql<{ study_id: string; status: string }[]>`
+    SELECT r.study_id, r.status FROM rounds r
+    JOIN assignments a ON a.round_id = r.id AND a.coder_id = ${auth.coder.id}
+    WHERE r.id = ${body.roundId}
+  `;
+  if (round.length === 0) {
+    return Response.json({ error: "You are not assigned to that round." }, { status: 403 });
+  }
+  if (round[0].status === "closed") {
+    return Response.json({ error: "This round is closed." }, { status: 403 });
+  }
+  const studyId = round[0].study_id;
 
   // An existing name is not an error worth stopping for: hand back the code
   // that already exists so the caller can simply apply it.
@@ -41,7 +55,7 @@ export async function POST(request: Request) {
     Array<{ id: string; name: string; color: string; definition: string; theme_id: string | null; archived: boolean }>
   >`
     SELECT id, name, color, definition, theme_id, archived
-    FROM codes WHERE lower(name) = lower(${name})
+    FROM codes WHERE study_id = ${studyId} AND lower(name) = lower(${name})
   `;
   if (existing.length > 0) {
     const code = existing[0];
@@ -59,13 +73,17 @@ export async function POST(request: Request) {
 
   const themeId = body.themeId?.trim() || null;
   if (themeId) {
-    const theme = await sql<{ id: string }[]>`SELECT id FROM themes WHERE id = ${themeId}`;
+    const theme = await sql<{ id: string }[]>`
+      SELECT id FROM themes WHERE id = ${themeId} AND study_id = ${studyId}
+    `;
     if (theme.length === 0) {
       return Response.json({ error: "That theme no longer exists." }, { status: 400 });
     }
   }
 
-  const [{ n }] = await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM codes`;
+  const [{ n }] = await sql<{ n: number }[]>`
+    SELECT count(*)::int AS n FROM codes WHERE study_id = ${studyId}
+  `;
 
   const [code] = await sql<
     Array<{
@@ -79,9 +97,9 @@ export async function POST(request: Request) {
       theme_id: string | null;
     }>
   >`
-    INSERT INTO codes (theme_id, name, definition, color, position, created_by, provisional)
-    VALUES (${themeId}, ${name}, ${(body.definition ?? "").trim()},
-            ${PALETTE[n % PALETTE.length]}, ${n}, ${auth.coder.id}, true)
+    INSERT INTO codes (study_id, theme_id, name, definition, color, position, created_by, provisional)
+    VALUES (${studyId}, ${themeId}, ${name}, ${(body.definition ?? "").trim()},
+            ${pickColor(n)}, ${n}, ${auth.coder.id}, true)
     RETURNING id, name, color, definition, inclusion, exclusion, example, theme_id
   `;
 

@@ -12,11 +12,17 @@ export const dynamic = "force-dynamic";
  * Cross-round view. The point of iterating a codebook is that agreement should
  * climb; this puts the rounds side by side so you can see whether it did.
  */
-export default async function AnalysisIndexPage() {
+export default async function AnalysisIndexPage({
+  params,
+}: {
+  params: Promise<{ studyId: string }>;
+}) {
+  const { studyId } = await params;
+  const base = `/studies/${studyId}`;
   const viewer = await currentCoder();
   if (!viewer) return <SignedOut />;
 
-  const rounds = await getRounds();
+  const rounds = await getRounds(studyId);
 
   const summaries = await Promise.all(
     rounds.map(async (round) => {
@@ -27,7 +33,8 @@ export default async function AnalysisIndexPage() {
         `,
         sql<{ id: string; name: string; theme_name: string | null }[]>`
           SELECT c.id, c.name, t.name AS theme_name
-          FROM codes c LEFT JOIN themes t ON t.id = c.theme_id ORDER BY c.position
+          FROM codes c LEFT JOIN themes t ON t.id = c.theme_id
+          WHERE c.study_id = ${studyId} ORDER BY c.position
         `,
         sql<AnnotationRow[]>`
           SELECT unit_id, coder_id, code_id, start_offset, end_offset
@@ -67,7 +74,7 @@ export default async function AnalysisIndexPage() {
 
       {rounds.length === 0 && (
         <p className="panel px-4 py-8 text-center muted text-[13px]">
-          No rounds yet. <Link href="/rounds/new">Create one</Link> to start coding.
+          No rounds yet. <Link href={`${base}/rounds/new`}>Create one</Link> to start coding.
         </p>
       )}
 
@@ -89,7 +96,7 @@ export default async function AnalysisIndexPage() {
               {summaries.map(({ round, report, active, assigned }) => (
                 <tr key={round.id} className="border-b last:border-0" style={{ borderColor: "var(--border)" }}>
                   <td className="px-4 py-2">
-                    <Link href={`/analysis/${round.id}`} className="font-medium">
+                    <Link href={`${base}/analysis/${round.id}`} className="font-medium">
                       Round {round.number}
                     </Link>
                     {round.name && <span className="muted"> · {round.name}</span>}

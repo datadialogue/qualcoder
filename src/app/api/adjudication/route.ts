@@ -42,6 +42,17 @@ export async function POST(request: Request) {
   const [{ text }] = await sql<{ text: string }[]>`SELECT text FROM units WHERE id = ${unitId}`;
   const codes = (body.codes ?? []).filter((c) => c.codeId);
 
+  const ids = [...new Set(codes.map((c) => c.codeId))];
+  if (ids.length > 0) {
+    const [{ n }] = await sql<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM codes c JOIN rounds r ON r.study_id = c.study_id
+      WHERE r.id = ${roundId} AND c.id = ANY(${ids}::uuid[])
+    `;
+    if (n !== ids.length) {
+      return Response.json({ error: "Some of those codes are not in this study's codebook." }, { status: 400 });
+    }
+  }
+
   await sql.begin(async (tx) => {
     await tx`
       DELETE FROM adjudicated_annotations

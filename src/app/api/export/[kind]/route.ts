@@ -2,6 +2,7 @@ import { sql } from "@/lib/db";
 import { coderOrUnauthorized } from "@/lib/auth";
 import { toCsv } from "@/lib/csv";
 import { computeReliability, type AnnotationRow, type ProgressRow } from "@/lib/reliability";
+import { getStudy, getStudyRound } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,10 @@ function csvResponse(filename: string, headers: string[], rows: Record<string, u
 
 const num = (v: number | null) => (v === null ? "" : v.toFixed(4));
 
+/** Filename-safe version of a study name. */
+const slugify = (name: string) =>
+  name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "study";
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ kind: string }> },
@@ -27,12 +32,21 @@ export async function GET(
 
   const { kind } = await params;
   const params_ = new URL(request.url).searchParams;
+  const study = await getStudy(params_.get("study") ?? "");
+  if (!study) {
+    return Response.json({ error: "Pass ?study=<id> for the study to export." }, { status: 400 });
+  }
+  const studyId = study.id;
   const roundId = params_.get("round");
   // Mirrors the analysis page: restrict which coders are compared. Without
   // this, one coder who has not started yet drives every kappa to undefined.
   const coderFilter = params_.get("coders")?.split(",").filter(Boolean) ?? null;
   const scoped = roundId && roundId !== "all" ? roundId : null;
-  const suffix = scoped ? `round-${scoped.slice(0, 8)}` : "all-rounds";
+  if (scoped && (await getStudyRound(studyId, scoped)) === null) {
+    return Response.json({ error: "That round is not part of this study." }, { status: 404 });
+  }
+  const prefix = slugify(study.name);
+  const suffix = `${prefix}-${scoped ? `round-${scoped.slice(0, 8)}` : "all-rounds"}`;
 
   switch (kind as Kind) {
     /* ---------------------------------------------------------------- */
@@ -60,7 +74,7 @@ export async function GET(
         JOIN units u ON u.id = a.unit_id
         JOIN codes c ON c.id = a.code_id
         LEFT JOIN themes t ON t.id = c.theme_id
-        WHERE ${scoped ? sql`a.round_id = ${scoped}` : sql`true`}
+        WHERE r.study_id = ${studyId} AND ${scoped ? sql`a.round_id = ${scoped}` : sql`true`}
         ORDER BY r.number, co.name, u.external_id, a.start_offset NULLS FIRST
       `;
       const metaKeys = [
@@ -87,7 +101,7 @@ export async function GET(
       // "judged not to apply" rather than "not looked at".
       const [codes, cells] = await Promise.all([
         sql<{ id: string; name: string }[]>`
-          SELECT id, name FROM codes ORDER BY position, name
+          SELECT id, name FROM codes WHERE study_id = ${studyId} ORDER BY position, name
         `,
         sql<
           Array<{
@@ -115,7 +129,7 @@ export async function GET(
           LEFT JOIN annotations a
                  ON a.round_id = up.round_id AND a.unit_id = up.unit_id
                 AND a.coder_id = up.coder_id
-          WHERE ${scoped ? sql`up.round_id = ${scoped}` : sql`true`}
+          WHERE r.study_id = ${studyId} AND ${scoped ? sql`up.round_id = ${scoped}` : sql`true`}
           GROUP BY r.number, co.name, u.external_id, u.text, up.status, u.meta
           ORDER BY r.number, co.name, u.external_id
         `,
@@ -152,10 +166,11 @@ export async function GET(
                c.example, c.color, c.archived, c.created_at, c.updated_at,
                (SELECT count(*)::int FROM annotations a WHERE a.code_id = c.id) AS times_applied
         FROM codes c LEFT JOIN themes t ON t.id = c.theme_id
+        WHERE c.study_id = ${studyId}
         ORDER BY t.position NULLS LAST, c.position
       `;
       return csvResponse(
-        "codebook.csv",
+        `codebook-${prefix}.csv`,
         ["theme", "code", "definition", "inclusion", "exclusion", "example", "color",
          "archived", "times_applied", "created_at", "updated_at"],
         rows,
@@ -171,7 +186,7 @@ export async function GET(
         JOIN rounds r ON r.id = up.round_id
         JOIN coders co ON co.id = up.coder_id
         JOIN units u ON u.id = up.unit_id
-        WHERE ${scoped ? sql`up.round_id = ${scoped}` : sql`true`}
+        WHERE r.study_id = ${studyId} AND ${scoped ? sql`up.round_id = ${scoped}` : sql`true`}
         ORDER BY r.number, co.name, u.external_id
       `;
       return csvResponse(
@@ -185,7 +200,7 @@ export async function GET(
     case "irr": {
       const rounds = await sql<{ id: string; number: number; name: string }[]>`
         SELECT id, number, name FROM rounds
-        WHERE ${scoped ? sql`id = ${scoped}` : sql`true`}
+        WHERE study_id = ${studyId} AND ${scoped ? sql`id = ${scoped}` : sql`true`}
         ORDER BY number
       `;
       const out: Record<string, unknown>[] = [];
@@ -198,7 +213,8 @@ export async function GET(
           `,
           sql<{ id: string; name: string; theme_name: string | null }[]>`
             SELECT c.id, c.name, t.name AS theme_name
-            FROM codes c LEFT JOIN themes t ON t.id = c.theme_id ORDER BY c.position
+            FROM codes c LEFT JOIN themes t ON t.id = c.theme_id
+            WHERE c.study_id = ${studyId} ORDER BY c.position
           `,
           sql<AnnotationRow[]>`
             SELECT unit_id, coder_id, code_id, start_offset, end_offset
@@ -268,7 +284,7 @@ export async function GET(
         LEFT JOIN adjudications adj
                ON adj.round_id = aa.round_id AND adj.unit_id = aa.unit_id
         LEFT JOIN coders res ON res.id = adj.resolved_by
-        WHERE ${scoped ? sql`aa.round_id = ${scoped}` : sql`true`}
+        WHERE r.study_id = ${studyId} AND ${scoped ? sql`aa.round_id = ${scoped}` : sql`true`}
         ORDER BY r.number, u.external_id, aa.start_offset NULLS FIRST
       `;
       return csvResponse(
@@ -281,29 +297,35 @@ export async function GET(
 
     /* ---------------------------------------------------------------- */
     case "project": {
-      // Complete archival dump, enough to reproduce every table.
+      // Complete archival dump of this study, enough to reproduce every table.
+      const inStudy = sql`round_id IN (SELECT id FROM rounds WHERE study_id = ${studyId})`;
       const [units, themes, codes, coders, rounds, roundUnits, assignments,
              unitAssignments, annotations, progress, adjudications, adjudicated] =
         await Promise.all([
-          sql`SELECT id, external_id, text, meta FROM units ORDER BY external_id`,
-          sql`SELECT * FROM themes ORDER BY position`,
-          sql`SELECT * FROM codes ORDER BY position`,
-          sql`SELECT id, name, email, role, active, created_at FROM coders ORDER BY name`,
-          sql`SELECT * FROM rounds ORDER BY number`,
-          sql`SELECT * FROM round_units ORDER BY round_id, position`,
-          sql`SELECT * FROM assignments`,
-          sql`SELECT * FROM unit_assignments`,
-          sql`SELECT * FROM annotations ORDER BY created_at`,
-          sql`SELECT * FROM unit_progress`,
-          sql`SELECT * FROM adjudications`,
-          sql`SELECT * FROM adjudicated_annotations`,
+          sql`SELECT id, external_id, text, meta, context FROM units
+              WHERE study_id = ${studyId} ORDER BY external_id`,
+          sql`SELECT * FROM themes WHERE study_id = ${studyId} ORDER BY position`,
+          sql`SELECT * FROM codes WHERE study_id = ${studyId} ORDER BY position`,
+          sql`SELECT id, name, email, role, active, created_at FROM coders
+              WHERE id IN (SELECT coder_id FROM assignments WHERE ${inStudy})
+                 OR id IN (SELECT created_by FROM codes WHERE study_id = ${studyId})
+              ORDER BY name`,
+          sql`SELECT * FROM rounds WHERE study_id = ${studyId} ORDER BY number`,
+          sql`SELECT * FROM round_units WHERE ${inStudy} ORDER BY round_id, position`,
+          sql`SELECT * FROM assignments WHERE ${inStudy}`,
+          sql`SELECT * FROM unit_assignments WHERE ${inStudy}`,
+          sql`SELECT * FROM annotations WHERE ${inStudy} ORDER BY created_at`,
+          sql`SELECT * FROM unit_progress WHERE ${inStudy}`,
+          sql`SELECT * FROM adjudications WHERE ${inStudy}`,
+          sql`SELECT * FROM adjudicated_annotations WHERE ${inStudy}`,
         ]);
 
       const body = JSON.stringify(
         {
           exported_at: new Date().toISOString(),
+          study,
           note:
-            "Complete project dump. Invite tokens are deliberately omitted. " +
+            "Complete study dump. Invite tokens are deliberately omitted. " +
             "unit_progress is required to interpret annotations: a unit absent " +
             "from it was never finished by that coder, and is missing data " +
             "rather than an absence of codes.",
@@ -322,7 +344,7 @@ export async function GET(
       return new Response(body, {
         headers: {
           "Content-Type": "application/json; charset=utf-8",
-          "Content-Disposition": `attachment; filename="project-export.json"`,
+          "Content-Disposition": `attachment; filename="study-${prefix}.json"`,
         },
       });
     }

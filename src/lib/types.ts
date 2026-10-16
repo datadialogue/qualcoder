@@ -1,5 +1,6 @@
 // Sampling config lives beside the algorithm so the two cannot drift apart.
 import type { SamplingConfig } from "./sampling";
+import type { ImportMapping } from "./starter";
 export type { SamplingConfig };
 
 export type Role = "lead" | "coder";
@@ -17,15 +18,46 @@ export interface Coder {
   created_at: string;
 }
 
+/** Read-only text shown above a unit while coding, e.g. the post a comment replies to. */
+export interface ContextItem {
+  label: string;
+  text: string;
+}
+
+export interface StudySettings {
+  /** Metadata keys shown as chips above each unit while coding. */
+  displayKeys?: string[];
+  /** Metadata key holding a URL to the original item, such as a Reddit permalink. */
+  linkKey?: string;
+  /** How the starter file was mapped, reused as the default for later imports. */
+  mapping?: ImportMapping;
+}
+
+export type StudyStatus = "active" | "archived";
+
+export interface Study {
+  id: string;
+  name: string;
+  description: string;
+  source: string;
+  settings: StudySettings;
+  status: StudyStatus;
+  created_by: string | null;
+  created_at: string;
+}
+
 export interface Unit {
   id: string;
+  study_id: string;
   external_id: string;
   text: string;
   meta: Record<string, string>;
+  context: ContextItem[];
 }
 
 export interface Theme {
   id: string;
+  study_id: string;
   name: string;
   description: string;
   color: string;
@@ -34,6 +66,7 @@ export interface Theme {
 
 export interface Code {
   id: string;
+  study_id: string;
   theme_id: string | null;
   name: string;
   definition: string;
@@ -49,9 +82,9 @@ export interface Code {
   provisional: boolean;
 }
 
-
 export interface Round {
   id: string;
+  study_id: string;
   number: number;
   name: string;
   status: RoundStatus;

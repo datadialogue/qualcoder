@@ -2,23 +2,25 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { currentCoder } from "@/lib/auth";
 import { sql } from "@/lib/db";
-import { getRound } from "@/lib/queries";
+import { getStudyRound } from "@/lib/queries";
 import { computeReliability, type AnnotationRow, type ProgressRow } from "@/lib/reliability";
 import { SignedOut } from "@/components/SignedOut";
 import { Adjudicator, type AdjUnit } from "@/components/Adjudicator";
+import type { ContextItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdjudicatePage({
   params,
 }: {
-  params: Promise<{ roundId: string }>;
+  params: Promise<{ studyId: string; roundId: string }>;
 }) {
-  const { roundId } = await params;
+  const { studyId, roundId } = await params;
+  const base = `/studies/${studyId}`;
   const viewer = await currentCoder();
   if (!viewer) return <SignedOut />;
 
-  const round = await getRound(roundId);
+  const round = await getStudyRound(studyId, roundId);
   if (!round) notFound();
 
   if (viewer.role !== "lead") {
@@ -26,7 +28,7 @@ export default async function AdjudicatePage({
       <div className="mx-auto max-w-2xl px-4 py-16">
         <p className="panel p-6 text-[13px] muted">
           Adjudication produces the agreed coding of record, so it is restricted to the project
-          lead. <Link href={`/analysis/${roundId}`}>View reliability instead</Link>
+          lead. <Link href={`${base}/analysis/${roundId}`}>View reliability instead</Link>
         </p>
       </div>
     );
@@ -40,7 +42,7 @@ export default async function AdjudicatePage({
     sql<{ id: string; name: string; color: string; theme_name: string | null }[]>`
       SELECT c.id, c.name, c.color, t.name AS theme_name
       FROM codes c LEFT JOIN themes t ON t.id = c.theme_id
-      WHERE c.archived = false ORDER BY c.position
+      WHERE c.study_id = ${studyId} AND c.archived = false ORDER BY c.position
     `,
     sql<AnnotationRow[]>`
       SELECT unit_id, coder_id, code_id, start_offset, end_offset
@@ -65,8 +67,8 @@ export default async function AdjudicatePage({
   let units: AdjUnit[] = [];
   if (unitIds.length > 0) {
     const [rows, detail, notes, agreed, adjudications] = await Promise.all([
-      sql<{ id: string; external_id: string; text: string; position: number }[]>`
-        SELECT u.id, u.external_id, u.text, ru.position
+      sql<{ id: string; external_id: string; text: string; context: ContextItem[]; position: number }[]>`
+        SELECT u.id, u.external_id, u.text, u.context, ru.position
         FROM units u JOIN round_units ru ON ru.unit_id = u.id AND ru.round_id = ${roundId}
         WHERE u.id = ANY(${unitIds}) ORDER BY ru.position
       `,
@@ -116,6 +118,7 @@ export default async function AdjudicatePage({
         id: u.id,
         external_id: u.external_id,
         text: u.text,
+        context: u.context ?? [],
         contested: [...(contestedByUnit.get(u.id) ?? [])],
         resolved: adj?.status === "resolved",
         resolvedNote: adj?.note ?? "",
@@ -149,7 +152,7 @@ export default async function AdjudicatePage({
     <div className="mx-auto max-w-4xl px-4 py-8">
       <header className="mb-5">
         <div className="flex items-center gap-2 mb-1">
-          <Link href={`/rounds/${roundId}`} className="text-[13px] muted">
+          <Link href={`${base}/rounds/${roundId}`} className="text-[13px] muted">
             Round {round.number}
             {round.name && ` · ${round.name}`}
           </Link>

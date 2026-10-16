@@ -2,21 +2,26 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { currentCoder } from "@/lib/auth";
 import { sql } from "@/lib/db";
-import { getCoders, getRound, getRoundProgress } from "@/lib/queries";
+import { getCoders, getRoundProgress, getStudyRound } from "@/lib/queries";
 import { SignedOut } from "@/components/SignedOut";
 import { ActionForm } from "@/components/ActionForm";
-import { ProgressBar, StatusChip } from "../../page";
+import { ProgressBar, StatusChip } from "@/components/Progress";
 import { addCoders, deleteRound, renameRound, setRoundStatus } from "../actions";
 
 export const dynamic = "force-dynamic";
 
-export default async function RoundDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+export default async function RoundDetailPage({
+  params,
+}: {
+  params: Promise<{ studyId: string; roundId: string }>;
+}) {
+  const { studyId, roundId: id } = await params;
   const coder = await currentCoder();
   if (!coder) return <SignedOut />;
 
-  const round = await getRound(id);
+  const round = await getStudyRound(studyId, id);
   if (!round) notFound();
+  const base = `/studies/${studyId}`;
 
   const isLead = coder.role === "lead";
   const [progress, allCoders, [counts], strataBreakdown] = await Promise.all([
@@ -64,11 +69,11 @@ export default async function RoundDetailPage({ params }: { params: Promise<{ id
               {mine.done === 0 ? "Start coding" : "Continue coding"}
             </Link>
           )}
-          <Link href={`/analysis/${id}`} className="btn">
+          <Link href={`${base}/analysis/${id}`} className="btn">
             Reliability
           </Link>
           {isLead && (
-            <Link href={`/adjudicate/${id}`} className="btn">
+            <Link href={`${base}/adjudicate/${id}`} className="btn">
               Adjudicate
             </Link>
           )}

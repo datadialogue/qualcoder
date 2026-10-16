@@ -39,16 +39,18 @@ const EXPORTS = [
   { kind: "codebook", name: "Codebook", detail: "Themes, codes, definitions and usage counts.", scoped: false },
   {
     kind: "project",
-    name: "Full project (JSON)",
-    detail: "Every table, for archival or reproduction. Invite tokens are omitted.",
+    name: "Full study (JSON)",
+    detail: "Every table for this study, for archival or reproduction. Invite tokens are omitted.",
     scoped: false,
   },
 ];
 
 export function ExportPanel({
+  studyId,
   rounds,
   coders,
 }: {
+  studyId: string;
   rounds: Array<{ id: string; label: string }>;
   coders: Array<{ id: string; name: string }>;
 }) {
@@ -59,7 +61,7 @@ export function ExportPanel({
   const coderParam = allSelected ? "" : `&coders=${selected.join(",")}`;
 
   const href = (kind: string, scoped: boolean) =>
-    `/api/export/${kind}${scoped ? `?round=${round}` : ""}${kind === "irr" ? coderParam : ""}`;
+    `/api/export/${kind}?study=${studyId}${scoped ? `&round=${round}` : ""}${kind === "irr" ? coderParam : ""}`;
 
   return (
     <div className="panel overflow-hidden">

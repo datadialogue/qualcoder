@@ -17,21 +17,30 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export default async function CodebookPage() {
+export default async function CodebookPage({
+  params,
+}: {
+  params: Promise<{ studyId: string }>;
+}) {
+  const { studyId } = await params;
   const coder = await currentCoder();
   if (!coder) return <SignedOut />;
 
   const isLead = coder.role === "lead";
   const [themes, archived, usage, authors] = await Promise.all([
-    getCodebook(),
+    getCodebook(studyId),
     sql<{ id: string; name: string }[]>`
-      SELECT id, name FROM codes WHERE archived = true ORDER BY name
+      SELECT id, name FROM codes WHERE study_id = ${studyId} AND archived = true ORDER BY name
     `,
     sql<{ code_id: string; n: number }[]>`
-      SELECT code_id, count(*)::int AS n FROM annotations GROUP BY code_id
+      SELECT a.code_id, count(*)::int AS n
+      FROM annotations a JOIN codes c ON c.id = a.code_id
+      WHERE c.study_id = ${studyId}
+      GROUP BY a.code_id
     `,
     sql<{ id: string; name: string }[]>`
       SELECT c.id, co.name FROM codes c JOIN coders co ON co.id = c.created_by
+      WHERE c.study_id = ${studyId}
     `,
   ]);
   const useCount = new Map(usage.map((u) => [u.code_id, u.n]));
@@ -87,10 +96,11 @@ export default async function CodebookPage() {
           <h2 className="text-[13px] font-semibold mb-1">Start by pasting your existing codes</h2>
           <p className="muted text-[13px] mb-3">
             One code per line as <code>theme, code, definition</code> — tab-separated works too, so
-            you can paste straight from a spreadsheet. A header row is detected automatically, and a
-            single column is read as a bare list of codes.
+            you can paste straight from a spreadsheet. A header row is detected automatically (and
+            picks up <code>inclusion</code>, <code>exclusion</code> and <code>example</code> columns),
+            a single column is read as a bare list of codes, and JSON is accepted as well.
           </p>
-          <ImportForm />
+          <ImportForm studyId={studyId} />
         </section>
       )}
 
@@ -117,6 +127,7 @@ export default async function CodebookPage() {
                   </summary>
                   <div className="panel absolute right-0 top-8 z-20 p-3 w-80 shadow-lg space-y-2">
                     <ActionForm action={updateTheme} className="space-y-2" submitLabel="Save theme">
+                      <input type="hidden" name="study_id" value={studyId} />
                       <input type="hidden" name="id" value={theme.id} />
                       <div>
                         <label className="label">Name</label>
@@ -147,6 +158,7 @@ export default async function CodebookPage() {
                       submitClassName="btn btn-danger w-full justify-center text-[12px]"
                       confirm={`Delete the theme "${theme.name}"? Its codes move to Unfiled and keep all their coding.`}
                     >
+                      <input type="hidden" name="study_id" value={studyId} />
                       <input type="hidden" name="id" value={theme.id} />
                     </ActionForm>
                   </div>
@@ -197,6 +209,7 @@ export default async function CodebookPage() {
                             submitLabel="Save code"
                             submitClassName="btn btn-primary col-span-2 w-fit"
                           >
+                            <input type="hidden" name="study_id" value={studyId} />
                             <input type="hidden" name="id" value={code.id} />
                             <div className="col-span-2 grid grid-cols-[1fr_180px_64px] gap-2">
                               <div>
@@ -272,6 +285,7 @@ export default async function CodebookPage() {
                                 submitLabel="Keep in codebook"
                                 submitClassName="btn btn-primary text-[12px]"
                               >
+                                <input type="hidden" name="study_id" value={studyId} />
                                 <input type="hidden" name="id" value={code.id} />
                               </ActionForm>
                             )}
@@ -280,6 +294,7 @@ export default async function CodebookPage() {
                               submitLabel="Archive"
                               submitClassName="btn text-[12px]"
                             >
+                              <input type="hidden" name="study_id" value={studyId} />
                               <input type="hidden" name="id" value={code.id} />
                               <input type="hidden" name="archived" value="true" />
                             </ActionForm>
@@ -290,6 +305,7 @@ export default async function CodebookPage() {
                                 submitClassName="btn btn-danger text-[12px]"
                                 confirm={`Delete the code "${code.name}"?`}
                               >
+                                <input type="hidden" name="study_id" value={studyId} />
                                 <input type="hidden" name="id" value={code.id} />
                               </ActionForm>
                             )}
@@ -334,9 +350,10 @@ export default async function CodebookPage() {
           <section className="panel p-4">
             <h2 className="text-[13px] font-semibold mb-2">Add a code</h2>
             <ActionForm action={createCode} className="space-y-2" submitLabel="Add code">
+              <input type="hidden" name="study_id" value={studyId} />
               <div>
                 <label className="label">Name</label>
-                <input className="input" name="name" placeholder="Threat of violence cited" />
+                <input className="input" name="name" placeholder="Sarcasm" />
               </div>
               <div>
                 <label className="label">Theme</label>
@@ -359,9 +376,10 @@ export default async function CodebookPage() {
           <section className="panel p-4">
             <h2 className="text-[13px] font-semibold mb-2">Add a theme</h2>
             <ActionForm action={createTheme} className="space-y-2" submitLabel="Add theme">
+              <input type="hidden" name="study_id" value={studyId} />
               <div>
                 <label className="label">Name</label>
-                <input className="input" name="name" placeholder="Content cited as grounds" />
+                <input className="input" name="name" placeholder="Tone" />
               </div>
               <div>
                 <label className="label">Description</label>
@@ -372,7 +390,7 @@ export default async function CodebookPage() {
             {totalCodes > 0 && (
               <div className="mt-5 pt-4 border-t" style={{ borderColor: "var(--border)" }}>
                 <h2 className="text-[13px] font-semibold mb-2">Bulk import</h2>
-                <ImportForm />
+                <ImportForm studyId={studyId} />
               </div>
             )}
           </section>
@@ -394,6 +412,7 @@ export default async function CodebookPage() {
                   submitLabel={`${c.name} — restore`}
                   submitClassName="btn text-[12px]"
                 >
+                  <input type="hidden" name="study_id" value={studyId} />
                   <input type="hidden" name="id" value={c.id} />
                   <input type="hidden" name="archived" value="false" />
                 </ActionForm>
@@ -406,18 +425,19 @@ export default async function CodebookPage() {
   );
 }
 
-function ImportForm() {
+function ImportForm({ studyId }: { studyId: string }) {
   return (
     <ActionForm action={importCodebook} className="space-y-2" submitLabel="Import codes">
+      <input type="hidden" name="study_id" value={studyId} />
       <textarea
         className="textarea font-mono text-[12px]"
         name="text"
         rows={6}
         placeholder={
           "theme,code,definition\n" +
-          "Content cited,Threat of violence,Names an explicit threat to harm or kill\n" +
-          "Content cited,Slur or hate speech,Cites a slur or identity-based attack\n" +
-          "Reasoning,Proportionality,Weighs how many messages were offensive"
+          "Tone,Sarcasm,Says the opposite of what is meant for effect\n" +
+          "Tone,Hostility,Attacks or belittles another person\n" +
+          "Stance,Agrees with the post,Explicitly endorses the original post's claim"
         }
       />
     </ActionForm>

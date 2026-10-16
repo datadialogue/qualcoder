@@ -38,6 +38,15 @@ export async function POST(request: Request) {
   const denied = await assertAssigned(roundId, unitId, auth.coder.id);
   if (denied) return Response.json({ error: denied }, { status: 403 });
 
+  // Each study has its own codebook; a code from another study cannot be applied.
+  const code = await sql<{ id: string }[]>`
+    SELECT c.id FROM codes c JOIN rounds r ON r.study_id = c.study_id
+    WHERE c.id = ${codeId} AND r.id = ${roundId}
+  `;
+  if (code.length === 0) {
+    return Response.json({ error: "That code is not part of this study's codebook." }, { status: 400 });
+  }
+
   const hasSpan = body.start !== null && body.start !== undefined && body.end !== null && body.end !== undefined;
   let start: number | null = null;
   let end: number | null = null;

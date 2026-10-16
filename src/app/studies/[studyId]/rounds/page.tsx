@@ -2,15 +2,17 @@ import Link from "next/link";
 import { currentCoder } from "@/lib/auth";
 import { getRoundProgress, getRoundSummaries } from "@/lib/queries";
 import { SignedOut } from "@/components/SignedOut";
-import { ProgressBar, StatusChip } from "../page";
+import { ProgressBar, StatusChip } from "@/components/Progress";
 
 export const dynamic = "force-dynamic";
 
-export default async function RoundsPage() {
+export default async function RoundsPage({ params }: { params: Promise<{ studyId: string }> }) {
+  const { studyId } = await params;
   const coder = await currentCoder();
   if (!coder) return <SignedOut />;
 
-  const rounds = await getRoundSummaries();
+  const base = `/studies/${studyId}`;
+  const rounds = await getRoundSummaries(studyId);
   const progress = new Map(
     await Promise.all(rounds.map(async (r) => [r.id, await getRoundProgress(r.id)] as const)),
   );
@@ -25,7 +27,7 @@ export default async function RoundsPage() {
           </p>
         </div>
         {coder.role === "lead" && (
-          <Link href="/rounds/new" className="btn btn-primary ml-auto">
+          <Link href={`${base}/rounds/new`} className="btn btn-primary ml-auto">
             New round
           </Link>
         )}
@@ -34,7 +36,7 @@ export default async function RoundsPage() {
       {rounds.length === 0 ? (
         <p className="panel px-4 py-8 text-center muted text-[13px]">
           No rounds yet.{" "}
-          {coder.role === "lead" && <Link href="/rounds/new">Create the first one.</Link>}
+          {coder.role === "lead" && <Link href={`${base}/rounds/new`}>Create the first one.</Link>}
         </p>
       ) : (
         <div className="space-y-3">
@@ -46,7 +48,7 @@ export default async function RoundsPage() {
             return (
               <article key={r.id} className="panel p-4">
                 <div className="flex items-center gap-3 mb-3">
-                  <Link href={`/rounds/${r.id}`} className="text-[14px] font-semibold">
+                  <Link href={`${base}/rounds/${r.id}`} className="text-[14px] font-semibold">
                     Round {r.number}
                     {r.name && <span className="muted font-normal"> · {r.name}</span>}
                   </Link>
@@ -61,7 +63,7 @@ export default async function RoundsPage() {
                         {mine.done === 0 ? "Start coding" : "Continue"}
                       </Link>
                     )}
-                    <Link href={`/analysis/${r.id}`} className="btn text-[12px]">
+                    <Link href={`${base}/analysis/${r.id}`} className="btn text-[12px]">
                       Reliability
                     </Link>
                   </div>

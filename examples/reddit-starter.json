@@ -1,0 +1,167 @@
+{
+  "study": {
+    "name": "Reddit starter example",
+    "description": "Synthetic posts and comments in the shape of a Pushshift / Arctic Shift dump, for trying the import. Not real Reddit data."
+  },
+  "mapping": {
+    "preset": "reddit",
+    "redditInclude": "both",
+    "displayKeys": ["kind", "subreddit", "score", "created"]
+  },
+  "codebook": [
+    {
+      "theme": "Stance",
+      "description": "Where the item stands on the proposal under discussion.",
+      "codes": [
+        {
+          "name": "Supports",
+          "definition": "Argues for the proposal or its outcome.",
+          "inclusion": "Explicit endorsement, or reasons offered in its favour.",
+          "exclusion": "Agreement with another commenter about something unrelated to the proposal."
+        },
+        {
+          "name": "Opposes",
+          "definition": "Argues against the proposal or its outcome."
+        },
+        {
+          "name": "Asks for information",
+          "definition": "Requests facts, sources or clarification rather than taking a side."
+        }
+      ]
+    },
+    {
+      "theme": "Reasoning",
+      "description": "The kind of grounds offered.",
+      "codes": [
+        {
+          "name": "Personal experience",
+          "definition": "Grounds the point in something the author did or saw themselves.",
+          "example": "I bike that stretch every morning and…"
+        },
+        {
+          "name": "Cost or money",
+          "definition": "Appeals to price, budget, taxes or economic effects."
+        },
+        {
+          "name": "Safety",
+          "definition": "Appeals to risk of injury or harm."
+        }
+      ]
+    }
+  ],
+  "data": [
+    {
+      "id": "x1a001",
+      "name": "t3_x1a001",
+      "subreddit": "examplecity",
+      "author": "commuter_42",
+      "title": "City council votes next week on the Elm Street protected bike lane",
+      "selftext": "It would remove 40 parking spots between 3rd and 9th. Thoughts?",
+      "score": 214,
+      "num_comments": 6,
+      "created_utc": 1767268800,
+      "permalink": "/r/examplecity/comments/x1a001/city_council_votes_next_week/",
+      "link_flair_text": "Local politics"
+    },
+    {
+      "id": "c0001",
+      "subreddit": "examplecity",
+      "author": "rainy_rider",
+      "body": "I bike Elm every morning and get buzzed by a car at least twice a week. A curb between me and traffic would change everything.",
+      "score": 88,
+      "created_utc": 1767270000,
+      "link_id": "t3_x1a001",
+      "parent_id": "t3_x1a001",
+      "permalink": "/r/examplecity/comments/x1a001/city_council_votes_next_week/c0001/"
+    },
+    {
+      "id": "c0002",
+      "subreddit": "examplecity",
+      "author": "shopkeep_elm",
+      "body": "Forty spots is most of the parking on my block. Half my customers drive in from out of town.",
+      "score": 31,
+      "created_utc": 1767271200,
+      "link_id": "t3_x1a001",
+      "parent_id": "t1_c0001",
+      "permalink": "/r/examplecity/comments/x1a001/city_council_votes_next_week/c0002/"
+    },
+    {
+      "id": "c0003",
+      "subreddit": "examplecity",
+      "author": "rainy_rider",
+      "body": "Is there any data on how many of them actually park on Elm rather than in the garage on 5th?",
+      "score": 22,
+      "created_utc": 1767272400,
+      "link_id": "t3_x1a001",
+      "parent_id": "t1_c0002",
+      "permalink": "/r/examplecity/comments/x1a001/city_council_votes_next_week/c0003/"
+    },
+    {
+      "id": "c0004",
+      "subreddit": "examplecity",
+      "author": "[deleted]",
+      "body": "[removed]",
+      "score": 1,
+      "created_utc": 1767273000,
+      "link_id": "t3_x1a001",
+      "parent_id": "t3_x1a001"
+    },
+    {
+      "id": "c0005",
+      "subreddit": "examplecity",
+      "author": "budget_hawk",
+      "body": "The estimate is $2.1M for eight blocks. That's a lot of potholes we could fill instead.",
+      "score": 17,
+      "created_utc": 1767274200,
+      "link_id": "t3_x1a001",
+      "parent_id": "t3_x1a001",
+      "permalink": "/r/examplecity/comments/x1a001/city_council_votes_next_week/c0005/"
+    },
+    {
+      "id": "c0006",
+      "subreddit": "examplecity",
+      "author": "ped_first",
+      "body": "Oh great, another year of arguing about paint while people get hit. Truly a city of visionaries.",
+      "score": 40,
+      "created_utc": 1767275400,
+      "link_id": "t3_x1a001",
+      "parent_id": "t1_c0005",
+      "permalink": "/r/examplecity/comments/x1a001/city_council_votes_next_week/c0006/"
+    },
+    {
+      "id": "x1a002",
+      "name": "t3_x1a002",
+      "subreddit": "examplecity",
+      "author": "newcomer_88",
+      "title": "Where can I read the actual proposal for the Elm St bike lane?",
+      "selftext": "",
+      "score": 12,
+      "num_comments": 2,
+      "created_utc": 1767355200,
+      "permalink": "/r/examplecity/comments/x1a002/where_can_i_read_the_actual_proposal/",
+      "link_flair_text": "Question"
+    },
+    {
+      "id": "c0007",
+      "subreddit": "examplecity",
+      "author": "commuter_42",
+      "body": "It's on the council agenda page under item 7B. The traffic study is attached as an appendix.",
+      "score": 9,
+      "created_utc": 1767356400,
+      "link_id": "t3_x1a002",
+      "parent_id": "t3_x1a002",
+      "permalink": "/r/examplecity/comments/x1a002/where_can_i_read_the_actual_proposal/c0007/"
+    },
+    {
+      "id": "c0008",
+      "subreddit": "examplecity",
+      "author": "shopkeep_elm",
+      "body": "Read the appendix. The injury numbers on Elm are worse than I assumed, honestly.",
+      "score": 14,
+      "created_utc": 1767357600,
+      "link_id": "t3_x1a002",
+      "parent_id": "t1_c0007",
+      "permalink": "/r/examplecity/comments/x1a002/where_can_i_read_the_actual_proposal/c0008/"
+    }
+  ]
+}

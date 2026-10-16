@@ -1,66 +1,37 @@
 /**
- * Loads the starting codebook derived from section 6.1 of the paper.
- *   npm run seed:codebook
- *   npm run seed:codebook -- --skip-observations   (omit the reflection theme)
+ * Loads the codebook from section 6.1 of the paper behind the original
+ * account-suspension study into a study.
+ *   npm run seed:codebook -- --study="Account suspension"
+ *   npm run seed:codebook -- --study=<id> --skip-observations   (omit the reflection theme)
+ *
+ * New studies normally bring their own codebook in the starter file; this is
+ * kept so the original study can be rebuilt from scratch.
  *
  * Safe to re-run: themes and codes are matched by name and updated in place,
  * so existing annotations keep pointing at the same codes.
  */
 import "./load-env.ts";
 import { PAPER_CODEBOOK } from "./paper-codebook.ts";
+import { argValue, requireStudy } from "./study-arg.ts";
 
 const { sql } = await import("../src/lib/db.ts");
+const { writeCodebook } = await import("../src/lib/codebook-write.ts");
 
+const study = await requireStudy(sql, argValue("study"));
 const skipObservations = process.argv.includes("--skip-observations");
 const themes = PAPER_CODEBOOK.filter((t) => !(skipObservations && t.fromObservations));
 
-let themeCount = 0;
-let codeCount = 0;
+const result = await sql.begin((tx) => writeCodebook(tx, study.id, themes));
 
-await sql.begin(async (tx) => {
-  let themePos = 0;
-  let codePos = 0;
-  for (const theme of themes) {
-    const [row] = await tx<{ id: string }[]>`
-      INSERT INTO themes (name, description, color, position)
-      VALUES (${theme.name}, ${theme.description}, ${theme.color}, ${themePos})
-      ON CONFLICT (name) DO UPDATE
-        SET description = EXCLUDED.description,
-            color = EXCLUDED.color,
-            position = EXCLUDED.position
-      RETURNING id
-    `;
-    themePos++;
-    themeCount++;
-
-    for (const code of theme.codes) {
-      await tx`
-        INSERT INTO codes (theme_id, name, definition, inclusion, exclusion, example,
-                           color, position, provisional)
-        VALUES (${row.id}, ${code.name}, ${code.definition}, ${code.inclusion ?? ""},
-                ${code.exclusion ?? ""}, ${code.example ?? ""}, ${code.color}, ${codePos}, false)
-        ON CONFLICT (name) DO UPDATE
-          SET theme_id = EXCLUDED.theme_id,
-              definition = EXCLUDED.definition,
-              inclusion = EXCLUDED.inclusion,
-              exclusion = EXCLUDED.exclusion,
-              example = EXCLUDED.example,
-              color = EXCLUDED.color,
-              position = EXCLUDED.position,
-              updated_at = now()
-      `;
-      codePos++;
-      codeCount++;
-    }
-  }
-});
-
-console.log(`Seeded ${codeCount} codes across ${themeCount} themes.`);
+console.log(
+  `"${study.name}": ${result.codesAdded} code(s) added, ${result.codesUpdated} updated, ` +
+    `${result.themesAdded} new theme(s).`,
+);
 if (!skipObservations) {
   console.log(
     "Includes the 'Reflection on the decision' theme, taken from the observations\n" +
-      "paragraph rather than the paper's formal codebook. Delete it on /codebook if\n" +
-      "you do not want it, or re-run with --skip-observations.",
+      "paragraph rather than the paper's formal codebook. Delete it on the codebook page\n" +
+      "if you do not want it, or re-run with --skip-observations.",
   );
 }
 await sql.end();

@@ -1,40 +1,24 @@
 /**
- * Development fixture: the paper's starting codebook, two example coders, and
- * one open round of 40 units. Handy for trying the app out end to end.
- *   npm run dev:seed
+ * Development fixture: two example coders and one open round of 40 units in a
+ * study that already has data. With --paper-codebook it also loads the
+ * original study's codebook. Handy for trying the app out end to end.
+ *   npm run import -- examples/reddit-starter.json --new
+ *   npm run dev:seed -- --study="Reddit starter example"
  */
 import "./load-env.ts";
 import { randomBytes } from "node:crypto";
 import { assignUnits, drawSample, type SampleInput, type SamplingConfig } from "../src/lib/sampling.ts";
+import { argValue, requireStudy } from "./study-arg.ts";
 
 const { sql, json } = await import("../src/lib/db.ts");
+const { writeCodebook } = await import("../src/lib/codebook-write.ts");
 
-// The starting codebook lives in one place so the demo and the real seed agree.
-const { PAPER_CODEBOOK } = await import("./paper-codebook.ts");
-
-const themeIds = new Map<string, string>();
-let themePos = 0;
-let codePos = 0;
-for (const theme of PAPER_CODEBOOK) {
-  const [row] = await sql<{ id: string }[]>`
-    INSERT INTO themes (name, description, color, position)
-    VALUES (${theme.name}, ${theme.description}, ${theme.color}, ${themePos})
-    ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description
-    RETURNING id
-  `;
-  themeIds.set(theme.name, row.id);
-  themePos++;
-  for (const code of theme.codes) {
-    await sql`
-      INSERT INTO codes (theme_id, name, definition, inclusion, exclusion, example, color, position)
-      VALUES (${row.id}, ${code.name}, ${code.definition}, ${code.inclusion ?? ""},
-              ${code.exclusion ?? ""}, ${code.example ?? ""}, ${code.color}, ${codePos})
-      ON CONFLICT (name) DO UPDATE SET definition = EXCLUDED.definition
-    `;
-    codePos++;
-  }
+const study = await requireStudy(sql, argValue("study"));
+if (process.argv.includes("--paper-codebook")) {
+  const { PAPER_CODEBOOK } = await import("./paper-codebook.ts");
+  const r = await sql.begin((tx) => writeCodebook(tx, study.id, PAPER_CODEBOOK));
+  console.log(`Codebook: ${r.codesAdded} code(s) added.`);
 }
-console.log(`Codebook: ${codePos} codes in ${themeIds.size} themes.`);
 
 const coders: { id: string; name: string; token: string }[] = [];
 for (const name of ["Ana Rivera", "Ben Okafor"]) {
@@ -56,28 +40,36 @@ const lead = await sql<{ id: string; name: string; token: string }[]>`
 `;
 const roster = [...lead, ...coders];
 
-const existingRound = await sql<{ id: string }[]>`SELECT id FROM rounds WHERE name = 'dev fixture'`;
+const existingRound = await sql<{ id: string }[]>`
+  SELECT id FROM rounds WHERE name = 'dev fixture' AND study_id = ${study.id}
+`;
 if (existingRound.length > 0) {
   console.log("Dev round already exists; leaving it alone.");
 } else {
   const config: SamplingConfig = {
-    mode: "stratified",
+    mode: "simple",
     size: 40,
-    strata: ["condition", "aor"],
+    strata: [],
     filters: {},
     excludePriorRounds: false,
     overlapFraction: 0.2,
   };
   const seed = "dev-fixture-seed";
-  const units = await sql<SampleInput[]>`SELECT id, meta FROM units`;
+  const units = await sql<SampleInput[]>`SELECT id, meta FROM units WHERE study_id = ${study.id}`;
+  if (units.length === 0) {
+    console.error(`"${study.name}" has no units; import data into it first.`);
+    process.exit(1);
+  }
   const unitIds = drawSample(units, config, seed);
   const pairs = assignUnits(unitIds, roster.map((c) => c.id), "full", seed);
 
   await sql.begin(async (tx) => {
-    const [{ next }] = await tx<{ next: number }[]>`SELECT COALESCE(max(number),0)+1 AS next FROM rounds`;
+    const [{ next }] = await tx<{ next: number }[]>`
+      SELECT COALESCE(max(number),0)+1 AS next FROM rounds WHERE study_id = ${study.id}
+    `;
     const [round] = await tx<{ id: string }[]>`
-      INSERT INTO rounds (number, name, status, sampling, seed, overlap_mode, opened_at)
-      VALUES (${next}, 'dev fixture', 'open', ${json(config)}, ${seed}, 'full', now())
+      INSERT INTO rounds (study_id, number, name, status, sampling, seed, overlap_mode, opened_at)
+      VALUES (${study.id}, ${next}, 'dev fixture', 'open', ${json(config)}, ${seed}, 'full', now())
       RETURNING id
     `;
     await tx`INSERT INTO round_units ${tx(unitIds.map((id, i) => ({ round_id: round.id, unit_id: id, position: i })), "round_id", "unit_id", "position")}`;

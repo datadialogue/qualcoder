@@ -3,12 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { buildSegments } from "@/lib/spans";
+import type { ContextItem } from "@/lib/types";
 
 export interface WorkUnit {
   id: string;
   external_id: string;
   text: string;
   meta: Record<string, string>;
+  /** Read-only text shown above the unit, such as the post a comment replies to. */
+  context: ContextItem[];
   position: number;
 }
 
@@ -47,12 +50,15 @@ export interface WorkProgress {
 
 interface Props {
   round: { id: string; number: number; name: string; status: string };
+  study: { id: string; name: string };
   coderName: string;
   units: WorkUnit[];
   codebook: WorkTheme[];
   initialAnnotations: WorkAnnotation[];
   initialProgress: WorkProgress[];
   metaKeys: string[];
+  /** Metadata key holding a link to the original item, if the study has one. */
+  linkKey: string | null;
 }
 
 type Filter = "all" | "todo" | "done" | "flagged";
@@ -89,12 +95,14 @@ function offsetIn(container: Node, node: Node, offset: number): number {
 
 export function CodingWorkspace({
   round,
+  study,
   coderName,
   units,
   codebook: initialCodebook,
   initialAnnotations,
   initialProgress,
   metaKeys,
+  linkKey,
 }: Props) {
   const [codebook, setCodebook] = useState(initialCodebook);
   const [annotations, setAnnotations] = useState(initialAnnotations);
@@ -278,6 +286,7 @@ export function CodingWorkspace({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          roundId: round.id,
           name,
           themeId: newCode.themeId || null,
           definition: newCode.definition.trim(),
@@ -415,8 +424,8 @@ export function CodingWorkspace({
           <p className="muted text-[13px]">
             You are on round {round.number}, but no units are assigned to you in it.
           </p>
-          <Link href="/" className="btn mt-3">
-            Back to overview
+          <Link href={`/studies/${study.id}`} className="btn mt-3">
+            Back to the study
           </Link>
         </div>
       </div>
@@ -431,8 +440,8 @@ export function CodingWorkspace({
         className="flex items-center gap-3 px-4 h-12 border-b shrink-0"
         style={{ background: "var(--panel)", borderColor: "var(--border)" }}
       >
-        <Link href="/" className="text-[13px] font-semibold">
-          ← Round {round.number}
+        <Link href={`/studies/${study.id}`} className="text-[13px] font-semibold">
+          ← <span className="muted font-normal">{study.name} /</span> Round {round.number}
           {round.name && <span className="muted font-normal"> · {round.name}</span>}
         </Link>
         <span className="chip num">
@@ -451,7 +460,7 @@ export function CodingWorkspace({
         )}
         <div className="ml-auto flex items-center gap-2">
           <span className="faint text-[12px]">{coderName}</span>
-          <Link href={`/analysis/${round.id}`} className="btn text-[12px]">
+          <Link href={`/studies/${study.id}/analysis/${round.id}`} className="btn text-[12px]">
             Reliability
           </Link>
         </div>
@@ -519,7 +528,7 @@ export function CodingWorkspace({
                       }}
                     />
                     <span className="flex-1 min-w-0">
-                      <span className="block text-[12px] leading-snug line-clamp-2">{u.text}</span>
+                      <span className="text-[12px] leading-snug line-clamp-2">{u.text}</span>
                       <span className="faint text-[10px] num">
                         #{u.position + 1}
                         {n > 0 && ` · ${n} code${n === 1 ? "" : "s"}`}
@@ -550,7 +559,28 @@ export function CodingWorkspace({
                   </span>
                 ) : null,
               )}
+              {linkKey && /^https?:\/\//.test(unit.meta[linkKey] ?? "") && (
+                <a
+                  href={unit.meta[linkKey]}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="chip"
+                  style={{ color: "var(--accent)" }}
+                >
+                  open original ↗
+                </a>
+              )}
             </div>
+
+            {/* Context is read-only and sits outside the text container, so it
+                can never be selected into a span or shift any offset. */}
+            {unit.context?.length > 0 && (
+              <div className="space-y-2 mb-4">
+                {unit.context.map((c, i) => (
+                  <ContextBlock key={i} item={c} />
+                ))}
+              </div>
+            )}
 
             <div
               ref={textRef}
@@ -878,6 +908,26 @@ export function CodingWorkspace({
           </div>
         </aside>
       </div>
+    </div>
+  );
+}
+
+/** A piece of surrounding context, collapsed when long so the unit stays in view. */
+function ContextBlock({ item }: { item: ContextItem }) {
+  const [open, setOpen] = useState(false);
+  const long = item.text.length > 280;
+  return (
+    <div
+      className="text-[13px] px-3 py-2 rounded"
+      style={{ background: "var(--panel)", border: "1px solid var(--border)", borderLeft: "3px solid var(--ink-faint)" }}
+    >
+      {item.label && <div className="label mb-0.5">{item.label}</div>}
+      <p className={`muted whitespace-pre-line ${long && !open ? "line-clamp-3" : ""}`}>{item.text}</p>
+      {long && (
+        <button className="faint text-[11px] mt-1 underline" onClick={() => setOpen(!open)}>
+          {open ? "show less" : "show more"}
+        </button>
+      )}
     </div>
   );
 }

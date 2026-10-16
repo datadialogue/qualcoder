@@ -3,13 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const links = [
-  { href: "/", label: "Overview" },
-  { href: "/codebook", label: "Codebook" },
-  { href: "/rounds", label: "Rounds" },
-  { href: "/analysis", label: "Reliability" },
-  { href: "/export", label: "Export" },
-];
+// Everything else lives inside a study and gets its own row from StudyNav.
+const links = [{ href: "/", label: "Studies" }];
 
 export function Nav({ coder }: { coder: { name: string; role: string } | null }) {
   const pathname = usePathname();
@@ -26,7 +21,10 @@ export function Nav({ coder }: { coder: { name: string; role: string } | null })
       </Link>
       <nav className="flex items-center gap-1">
         {links.map((l) => {
-          const active = l.href === "/" ? pathname === "/" : pathname?.startsWith(l.href);
+          const active =
+            l.href === "/"
+              ? pathname === "/" || pathname?.startsWith("/studies")
+              : pathname?.startsWith(l.href);
           return (
             <Link
               key={l.href}

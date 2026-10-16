@@ -6,6 +6,9 @@ import type { ActionResult } from "@/lib/action-result";
 
 export interface NewRoundFormProps {
   action: (prev: ActionResult, fd: FormData) => Promise<ActionResult>;
+  studyId: string;
+  /** Pre-selected strata: whatever the study's previous round used. */
+  defaultStrata: string[];
   coders: Array<{ id: string; name: string; role: string }>;
   facets: Record<string, string[]>;
   priorRounds: Array<{ id: string; number: number; name: string; unit_count: number }>;
@@ -16,6 +19,8 @@ export interface NewRoundFormProps {
 
 export function NewRoundForm({
   action,
+  studyId,
+  defaultStrata,
   coders,
   facets,
   priorRounds,
@@ -24,13 +29,13 @@ export function NewRoundForm({
   defaultSeed,
 }: NewRoundFormProps) {
   const [source, setSource] = useState<"new" | "reuse">("new");
-  const [mode, setMode] = useState<"stratified" | "simple" | "all">("stratified");
+  const [mode, setMode] = useState<"stratified" | "simple" | "all">(
+    defaultStrata.length > 0 ? "stratified" : "simple",
+  );
   const [overlap, setOverlap] = useState<"full" | "subset">("full");
   const [excludePrior, setExcludePrior] = useState(priorRounds.length > 0);
   const [selected, setSelected] = useState<string[]>(coders.map((c) => c.id));
-  const [strata, setStrata] = useState<string[]>(
-    ["condition", "aor"].filter((k) => k in facets),
-  );
+  const [strata, setStrata] = useState<string[]>(defaultStrata.filter((k) => k in facets));
 
   const facetKeys = Object.keys(facets);
   const available = excludePrior ? unusedUnits : totalUnits;
@@ -40,6 +45,7 @@ export function NewRoundForm({
 
   return (
     <ActionForm action={action} className="space-y-5" submitLabel="Create round and draw sample">
+      <input type="hidden" name="study_id" value={studyId} />
       <Section
         title="Coders"
         hint="Everyone selected gets the same sample. Reliability needs at least two."

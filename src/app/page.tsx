@@ -1,9 +1,15 @@
 import Link from "next/link";
 import { currentCoder } from "@/lib/auth";
-import { sql } from "@/lib/db";
 import { configProblems } from "@/lib/env";
-import { getRoundProgress, getRoundSummaries } from "@/lib/queries";
+import {
+  getCoderStudyIds,
+  getOpenWork,
+  getRoundProgress,
+  getStudySummaries,
+  type StudySummary,
+} from "@/lib/queries";
 import { SignedOut } from "@/components/SignedOut";
+import { Callout, ProgressBar, StatusChip } from "@/components/Progress";
 
 export const dynamic = "force-dynamic";
 
@@ -21,61 +27,62 @@ export default async function HomePage() {
   }
   if (!coder) return <SignedOut />;
 
-  const [[counts], rounds] = await Promise.all([
-    sql<{ units: number; codes: number; coders: number }[]>`
-      SELECT (SELECT count(*)::int FROM units) AS units,
-             (SELECT count(*)::int FROM codes WHERE archived = false) AS codes,
-             (SELECT count(*)::int FROM coders WHERE active = true) AS coders
-    `,
-    getRoundSummaries(),
+  const isLead = coder.role === "lead";
+  const [studies, openWork, assignedStudyIds] = await Promise.all([
+    getStudySummaries(),
+    getOpenWork(coder.id),
+    getCoderStudyIds(coder.id),
   ]);
-
-  const progressByRound = new Map(
+  const progress = new Map(
     await Promise.all(
-      rounds.map(async (r) => [r.id, await getRoundProgress(r.id)] as const),
+      openWork.map(async (r) => {
+        const p = await getRoundProgress(r.id);
+        return [r.id, p.find((x) => x.coder_id === coder.id)] as const;
+      }),
     ),
   );
 
-  const mine = rounds.filter(
-    (r) => r.status === "open" && progressByRound.get(r.id)?.some((p) => p.coder_id === coder.id),
-  );
+  // Coders see the studies they have been on a round in; leads see everything.
+  const visible = studies.filter((s) => isLead || assignedStudyIds.has(s.id));
+  const active = visible.filter((s) => s.status === "active");
+  const archived = visible.filter((s) => s.status === "archived");
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
-      <header className="mb-6">
-        <h1 className="text-xl font-semibold tracking-tight">
-          {greeting()}, {coder.name.split(" ")[0]}
-        </h1>
-        <p className="muted text-[13px] mt-1">
-          {counts.units.toLocaleString()} units imported · {counts.codes} active codes ·{" "}
-          {counts.coders} coder{counts.coders === 1 ? "" : "s"}
-        </p>
+      <header className="mb-6 flex items-start gap-3">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">
+            {greeting()}, {coder.name.split(" ")[0]}
+          </h1>
+          <p className="muted text-[13px] mt-1">
+            {active.length} active stud{active.length === 1 ? "y" : "ies"}
+            {openWork.length > 0 &&
+              ` · ${openWork.length} open round${openWork.length === 1 ? "" : "s"} assigned to you`}
+          </p>
+        </div>
+        {isLead && (
+          <Link href="/studies/new" className="btn btn-primary ml-auto">
+            New study
+          </Link>
+        )}
       </header>
 
-      {counts.codes === 0 && coder.role === "lead" && (
+      {isLead && studies.length === 0 && (
         <Callout
-          title="Your codebook is empty"
-          body="Paste your existing themes and codes in before creating a round, so coders have something to apply."
-          href="/codebook"
-          cta="Set up the codebook"
-        />
-      )}
-      {counts.codes > 0 && rounds.length === 0 && coder.role === "lead" && (
-        <Callout
-          title="No rounds yet"
-          body="A round draws a shared sample and assigns it to coders. Everyone on a round sees exactly the same units in the same order."
-          href="/rounds/new"
-          cta="Create the first round"
+          title="Start your first study"
+          body="A study holds one dataset, its codebook and its coding rounds. Upload a starter file — a CSV, JSON, JSON Lines or a Reddit export — optionally with a starting codebook."
+          href="/studies/new"
+          cta="New study"
         />
       )}
 
-      {mine.length > 0 && (
+      {openWork.length > 0 && (
         <section className="mb-6">
           <h2 className="label mb-2">Your open work</h2>
           <div className="space-y-2">
-            {mine.map((r) => {
-              const me = progressByRound.get(r.id)!.find((p) => p.coder_id === coder.id)!;
-              const pct = me.assigned ? Math.round((me.done / me.assigned) * 100) : 0;
+            {openWork.map((r) => {
+              const me = progress.get(r.id);
+              const pct = me?.assigned ? Math.round((me.done / me.assigned) * 100) : 0;
               return (
                 <Link
                   key={r.id}
@@ -84,19 +91,21 @@ export default async function HomePage() {
                 >
                   <div className="flex-1 min-w-0">
                     <div className="text-[13px] font-medium">
-                      Round {r.number}
+                      {r.study_name} <span className="faint font-normal">/</span> Round {r.number}
                       {r.name && <span className="muted font-normal"> · {r.name}</span>}
                     </div>
-                    <div className="faint text-[12px] mt-0.5 num">
-                      {me.done} of {me.assigned} units done · {me.annotations} annotations
-                      {me.flagged > 0 && ` · ${me.flagged} flagged`}
-                    </div>
+                    {me && (
+                      <div className="faint text-[12px] mt-0.5 num">
+                        {me.done} of {me.assigned} units done · {me.annotations} annotations
+                        {me.flagged > 0 && ` · ${me.flagged} flagged`}
+                      </div>
+                    )}
                   </div>
                   <div className="w-40 shrink-0">
                     <ProgressBar pct={pct} />
                   </div>
                   <span className="btn btn-primary text-[12px] shrink-0">
-                    {me.done === 0 ? "Start coding" : pct === 100 ? "Review" : "Continue"}
+                    {!me || me.done === 0 ? "Start coding" : pct === 100 ? "Review" : "Continue"}
                   </span>
                 </Link>
               );
@@ -106,59 +115,55 @@ export default async function HomePage() {
       )}
 
       <section>
-        <div className="flex items-center gap-2 mb-2">
-          <h2 className="label mb-0">All rounds</h2>
-          {coder.role === "lead" && (
-            <Link href="/rounds/new" className="btn text-[12px] ml-auto">
-              New round
-            </Link>
-          )}
-        </div>
-        {rounds.length === 0 ? (
-          <p className="panel px-4 py-6 text-center muted text-[13px]">No rounds yet.</p>
+        <h2 className="label mb-2">Studies</h2>
+        {active.length === 0 ? (
+          <p className="panel px-4 py-6 text-center muted text-[13px]">
+            {isLead ? "No active studies." : "You have not been assigned to a study yet."}
+          </p>
         ) : (
-          <div className="space-y-2">
-            {rounds.map((r) => {
-              const progress = progressByRound.get(r.id) ?? [];
-              const done = progress.reduce((n, p) => n + p.done, 0);
-              const assigned = progress.reduce((n, p) => n + p.assigned, 0);
-              return (
-                <div key={r.id} className="panel px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <Link href={`/rounds/${r.id}`} className="text-[13px] font-medium">
-                      Round {r.number}
-                      {r.name && <span className="muted font-normal"> · {r.name}</span>}
-                    </Link>
-                    <StatusChip status={r.status} />
-                    <span className="faint text-[12px] num">
-                      {r.unit_count} units · {r.coder_count} coders
-                    </span>
-                    <div className="ml-auto flex gap-1.5">
-                      <Link href={`/analysis/${r.id}`} className="btn text-[12px]">
-                        Reliability
-                      </Link>
-                      <Link href={`/rounds/${r.id}`} className="btn text-[12px]">
-                        Details
-                      </Link>
-                    </div>
-                  </div>
-                  {progress.length > 0 && (
-                    <div className="mt-2 flex items-center gap-3">
-                      <div className="flex-1">
-                        <ProgressBar pct={assigned ? Math.round((done / assigned) * 100) : 0} />
-                      </div>
-                      <span className="faint text-[11px] num shrink-0">
-                        {done}/{assigned} coded
-                      </span>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+          <div className="grid md:grid-cols-2 gap-3">
+            {active.map((s) => (
+              <StudyCard key={s.id} study={s} />
+            ))}
           </div>
+        )}
+        {archived.length > 0 && (
+          <details className="mt-4">
+            <summary className="label cursor-pointer">
+              {archived.length} archived stud{archived.length === 1 ? "y" : "ies"}
+            </summary>
+            <div className="grid md:grid-cols-2 gap-3 mt-2">
+              {archived.map((s) => (
+                <StudyCard key={s.id} study={s} />
+              ))}
+            </div>
+          </details>
         )}
       </section>
     </div>
+  );
+}
+
+function StudyCard({ study }: { study: StudySummary }) {
+  return (
+    <Link
+      href={`/studies/${study.id}`}
+      className="panel px-4 py-3 block hover:border-[var(--ink-faint)] transition-colors"
+      style={{ opacity: study.status === "archived" ? 0.7 : 1 }}
+    >
+      <div className="flex items-center gap-2">
+        <span className="text-[14px] font-semibold truncate">{study.name}</span>
+        <span className="chip">{study.source}</span>
+        {study.open_rounds > 0 && <StatusChip status="open" />}
+      </div>
+      {study.description && (
+        <p className="muted text-[12px] mt-1 line-clamp-2">{study.description}</p>
+      )}
+      <p className="faint text-[12px] mt-1.5 num">
+        {study.unit_count.toLocaleString()} units · {study.code_count} codes · {study.round_count}{" "}
+        round{study.round_count === 1 ? "" : "s"}
+      </p>
+    </Link>
   );
 }
 
@@ -167,53 +172,6 @@ function greeting() {
   if (h < 12) return "Good morning";
   if (h < 18) return "Good afternoon";
   return "Good evening";
-}
-
-export function ProgressBar({ pct }: { pct: number }) {
-  return (
-    <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "var(--border)" }}>
-      <div
-        className="h-full rounded-full transition-[width]"
-        style={{ width: `${Math.min(100, Math.max(0, pct))}%`, background: "var(--accent)" }}
-      />
-    </div>
-  );
-}
-
-export function StatusChip({ status }: { status: string }) {
-  const style: Record<string, { bg: string; fg: string }> = {
-    open: { bg: "var(--accent-soft)", fg: "var(--accent)" },
-    draft: { bg: "var(--warn-soft)", fg: "var(--warn)" },
-    closed: { bg: "var(--border)", fg: "var(--ink-soft)" },
-  };
-  const s = style[status] ?? style.closed;
-  return (
-    <span className="chip" style={{ background: s.bg, color: s.fg, borderColor: "transparent" }}>
-      {status}
-    </span>
-  );
-}
-
-function Callout({
-  title,
-  body,
-  href,
-  cta,
-}: {
-  title: string;
-  body: string;
-  href: string;
-  cta: string;
-}) {
-  return (
-    <div className="panel p-4 mb-6" style={{ borderColor: "var(--accent)" }}>
-      <h2 className="text-[13px] font-semibold mb-1">{title}</h2>
-      <p className="muted text-[13px] mb-3 max-w-xl">{body}</p>
-      <Link href={href} className="btn btn-primary text-[12px]">
-        {cta}
-      </Link>
-    </div>
-  );
 }
 
 function SetupNeeded({ problems }: { problems: string[] }) {
@@ -238,10 +196,10 @@ function SetupNeeded({ problems }: { problems: string[] }) {
             Run <code>npm run db:migrate</code>.
           </li>
           <li>
-            Import your data: <code>npm run import -- yourfile.csv</code>.
+            Mint the first invite: <code>npm run seed:lead -- --name=&quot;Your Name&quot;</code>.
           </li>
           <li>
-            Mint the first invite: <code>npm run seed:lead -- --name=&quot;Your Name&quot;</code>.
+            Open the link, then create a study from the home page by uploading a starter file.
           </li>
         </ol>
       </div>

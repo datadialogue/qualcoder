@@ -5,7 +5,7 @@ import { getCoders } from "@/lib/queries";
 import { SignedOut } from "@/components/SignedOut";
 import { ActionForm } from "@/components/ActionForm";
 import { CopyLink } from "@/components/CopyLink";
-import { createCoder, importUnits, regenerateToken, setCoderActive, setCoderRole } from "./actions";
+import { createCoder, regenerateToken, setCoderActive, setCoderRole } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -22,15 +22,12 @@ export default async function AdminPage() {
     );
   }
 
-  const [coders, [counts], metaKeys] = await Promise.all([
+  const [coders, [counts]] = await Promise.all([
     getCoders(false),
-    sql<{ units: number; annotations: number }[]>`
-      SELECT (SELECT count(*)::int FROM units) AS units,
+    sql<{ studies: number; units: number; annotations: number }[]>`
+      SELECT (SELECT count(*)::int FROM studies) AS studies,
+             (SELECT count(*)::int FROM units) AS units,
              (SELECT count(*)::int FROM annotations) AS annotations
-    `,
-    sql<{ key: string }[]>`
-      SELECT DISTINCT kv.key FROM units u, LATERAL jsonb_each_text(u.meta) AS kv(key, value)
-      ORDER BY kv.key
     `,
   ]);
 
@@ -44,7 +41,8 @@ export default async function AdminPage() {
       <header className="mb-6">
         <h1 className="text-xl font-semibold tracking-tight">Admin</h1>
         <p className="muted text-[13px] mt-1 num">
-          {counts.units.toLocaleString()} units · {counts.annotations.toLocaleString()} annotations
+          {counts.studies} stud{counts.studies === 1 ? "y" : "ies"} · {counts.units.toLocaleString()}{" "}
+          units · {counts.annotations.toLocaleString()} annotations
         </p>
       </header>
 
@@ -120,37 +118,21 @@ export default async function AdminPage() {
               <label className="label">Role</label>
               <select className="select" name="role" defaultValue="coder">
                 <option value="coder">Coder</option>
-                <option value="lead">Lead — can manage rounds, codebook and adjudication</option>
+                <option value="lead">Lead — can manage studies, rounds, codebooks and adjudication</option>
               </select>
             </div>
           </ActionForm>
         </section>
 
         <section className="panel p-4">
-          <h2 className="text-[13px] font-semibold mb-1">Import data</h2>
+          <h2 className="text-[13px] font-semibold mb-1">Studies and data</h2>
           <p className="muted text-[12px] mb-3">
-            Rows are matched on the id columns, so re-importing a corrected file updates units in
-            place and leaves existing coding attached.
+            Each study has its own data, codebook and rounds. Start one from a starter file, or add
+            data to an existing study from its <em>Data &amp; settings</em> page.
           </p>
-          <ActionForm action={importUnits} className="space-y-2" submitLabel="Import CSV">
-            <div>
-              <label className="label">CSV file</label>
-              <input className="input" type="file" name="file" accept=".csv,text/csv" />
-            </div>
-            <div>
-              <label className="label">Column holding the text to code</label>
-              <input className="input" name="text_column" defaultValue="justification" />
-            </div>
-            <div>
-              <label className="label">Columns forming a unique id</label>
-              <input className="input" name="id_columns" defaultValue="user_id,account" />
-            </div>
-          </ActionForm>
-          {metaKeys.length > 0 && (
-            <p className="faint text-[12px] mt-2">
-              Current metadata columns: {metaKeys.map((m) => m.key).join(", ")}
-            </p>
-          )}
+          <Link href="/studies/new" className="btn btn-primary">
+            New study
+          </Link>
         </section>
       </div>
     </div>
