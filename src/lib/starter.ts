@@ -250,7 +250,13 @@ export function looksLikeReddit(fields: string[]): boolean {
   const reddit = ["subreddit", "permalink", "link_id", "parent_id", "subreddit_id"].some((k) =>
     f.has(k),
   );
-  return text && reddit;
+  // Tidy, anonymised exports: one text column for posts and replies alike,
+  // with the thread spelled out as thread_id / parent_id / is_main_post.
+  const tidy =
+    f.has("text_content") &&
+    f.has("parent_id") &&
+    (f.has("thread_id") || f.has("is_main_post") || f.has("item_type"));
+  return (text && reddit) || tidy;
 }
 
 interface RedditItem {
@@ -277,20 +283,29 @@ function withPrefix(id: string, prefix: "t1_" | "t3_"): string {
 }
 
 function normalizeReddit(r: Record<string, string>): RedditItem | null {
-  const kindRaw = (r.kind ?? r.type ?? "").toLowerCase();
+  const kindRaw = (r.kind ?? r.type ?? r.item_type ?? "").toLowerCase();
+  const mainPost = (r.is_main_post ?? "").trim().toLowerCase();
   let kind: RedditItem["kind"] | null = null;
-  if (kindRaw === "t1" || kindRaw === "comment") kind = "comment";
-  else if (["t3", "post", "submission", "link"].includes(kindRaw)) kind = "post";
+  if (["t1", "comment", "reply"].includes(kindRaw)) kind = "comment";
+  else if (["t3", "post", "submission", "link", "main_post"].includes(kindRaw)) kind = "post";
+  else if (["1", "true", "yes"].includes(mainPost)) kind = "post";
+  else if (["0", "false", "no"].includes(mainPost)) kind = "comment";
   else if (r.body !== undefined) kind = "comment";
   else if (r.title !== undefined || r.selftext !== undefined) kind = "post";
   if (!kind) return null;
 
   const prefix = kind === "comment" ? "t1_" : "t3_";
-  const fullname = /^t\d_/.test(r.name ?? "") ? r.name : withPrefix(r.id ?? "", prefix);
+  const fullname = /^t\d_/.test(r.name ?? "")
+    ? r.name
+    : withPrefix(r.id ?? r.unit_id ?? "", prefix);
 
   let text: string;
   let removed: boolean;
-  if (kind === "comment") {
+  if (r.body === undefined && r.title === undefined && r.selftext === undefined) {
+    // Tidy exports put a post's title and self-text together in one column.
+    text = (r.text_content ?? r.text ?? "").trim();
+    removed = REMOVED.has(text);
+  } else if (kind === "comment") {
     const body = (r.body ?? "").trim();
     removed = REMOVED.has(body);
     text = body;
@@ -308,11 +323,11 @@ function normalizeReddit(r: Record<string, string>): RedditItem | null {
   const meta: Record<string, string> = {
     kind,
     subreddit: (r.subreddit ?? "").replace(/^r\//, ""),
-    author: r.author ?? "",
+    author: r.author ?? r.author_anon ?? "",
     score: r.score ?? "",
     created: isoTime(r.created_utc ?? r.created ?? r.timestamp ?? ""),
     permalink,
-    post_id: kind === "comment" ? withPrefix(r.link_id ?? "", "t3_") : fullname,
+    post_id: kind === "comment" ? withPrefix(r.link_id ?? r.thread_id ?? "", "t3_") : fullname,
     parent_id: kind === "comment" ? (r.parent_id ?? "") : "",
     num_comments: kind === "post" ? (r.num_comments ?? "") : "",
     flair: r.link_flair_text ?? "",
@@ -481,7 +496,9 @@ export function buildUnits(
       if (mapping.redditContext && it.kind === "comment") {
         const post = byFullname.get(it.meta.post_id);
         const sub = it.meta.subreddit ? ` · r/${it.meta.subreddit}` : "";
-        if (post?.text) context.push({ label: `Original post${sub}`, text: truncate(post.text, 1500) });
+        // Without a parent comment shown, say outright that this replies to the post.
+        const direct = it.meta.parent_id === it.meta.post_id ? " · replying directly to it" : "";
+        if (post?.text) context.push({ label: `Original post${sub}${direct}`, text: truncate(post.text, 1500) });
         else if (it.raw.link_title) context.push({ label: `Original post${sub}`, text: it.raw.link_title });
         const parent = it.meta.parent_id.startsWith("t1_") ? byFullname.get(it.meta.parent_id) : undefined;
         if (parent?.text) context.push({ label: "Replying to", text: truncate(parent.text, 1000) });

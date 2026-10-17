@@ -74,6 +74,41 @@ test("JSON Lines Reddit comments are detected and get standard metadata", () => 
   assert.equal(units.find((u) => u.external_id === "t1_c1")!.context.length, 1);
 });
 
+test("a tidy Reddit CSV with thread_id and is_main_post gets the Reddit preset and context", () => {
+  const csv = [
+    "unit_id,thread_id,parent_id,item_type,is_main_post,text_content,author_anon,created_utc,score",
+    't3_p1,t3_p1,,main_post,1,"Title\n\nPost body",User_a,1700000000,4',
+    "t1_c1,t3_p1,t3_p1,reply,0,Top-level reply,User_b,1700000100,2",
+    "t1_c2,t3_p1,t1_c1,reply,0,Nested reply,User_c,1700000200,1",
+    "t1_c3,t3_p1,t3_p1,reply,0,[deleted],User_d,1700000300,1",
+  ].join("\n");
+  const { parsed, units, stats } = build(csv);
+  assert.equal(parsed.format, "csv");
+  assert.equal(defaultMapping(parsed).preset, "reddit");
+  assert.equal(stats.removed, 1);
+
+  const post = units.find((u) => u.external_id === "t3_p1")!;
+  assert.equal(post.meta.kind, "post");
+  assert.equal(post.text, "Title\n\nPost body");
+  assert.equal(post.meta.author, "User_a");
+
+  const top = units.find((u) => u.external_id === "t1_c1")!;
+  assert.equal(top.meta.kind, "comment");
+  assert.deepEqual(top.context.map((c) => c.label), ["Original post · replying directly to it"]);
+
+  const nested = units.find((u) => u.external_id === "t1_c2")!;
+  assert.deepEqual(
+    nested.context.map((c) => [c.label, c.text]),
+    [
+      ["Original post", "Title\n\nPost body"],
+      ["Replying to", "Top-level reply"],
+    ],
+  );
+
+  // Main posts only.
+  assert.deepEqual(build(csv, { redditInclude: "posts" }).units.map((u) => u.external_id), ["t3_p1"]);
+});
+
 test("Reddit include filter keeps posts available as context", () => {
   const jsonl = [
     JSON.stringify({ id: "p1", title: "Post", subreddit: "s", permalink: "/r/s/comments/p1/" }),

@@ -178,7 +178,7 @@ Anything with one record per item to be coded. The format is detected from the c
 | --- | --- |
 | CSV | One row per unit. Pick the text column(s) and the id column(s) in the preview. |
 | JSON array / JSON Lines | One object per unit. Nested values are ignored; scalars become metadata. |
-| Reddit | Detected from fields like `body`, `selftext`, `subreddit`, `link_id`. Dumps, PRAW exports and `reddit.com/….json` listings all work. |
+| Reddit | Detected from fields like `body`, `selftext`, `subreddit`, `link_id`. Dumps, PRAW exports and `reddit.com/….json` listings all work, as do tidy CSVs with `text_content`, `thread_id`, `parent_id` and `is_main_post` / `item_type` columns. |
 | Bundle | A JSON object carrying the data plus the study's name and codebook, below. |
 
 ```json
