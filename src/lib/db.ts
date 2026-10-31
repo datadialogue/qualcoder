@@ -15,6 +15,15 @@ function connect(): postgres.Sql {
     );
   }
 
+  // `npm run dev:local` promises throwaway data; refuse rather than risk
+  // writing dummy coding into a real database.
+  if (process.env.QUALCODE_LOCAL === "1" && !resolved.local) {
+    throw new Error(
+      `dev:local is running but ${resolved.key} points at a non-local database. ` +
+        "Unset it in your shell, or set LOCAL_DATABASE_URL to a localhost connection string.",
+    );
+  }
+
   if (!resolved.local && !resolved.pooled) {
     // Not fatal -- it works, and at this scale it will probably keep working --
     // but the direct endpoint is the wrong one to hand to serverless functions.
@@ -30,6 +39,9 @@ function connect(): postgres.Sql {
     // Pooled connections run pgbouncer in transaction mode, which cannot
     // support session-level prepared statements.
     prepare: false,
+    // "already exists, skipping" and the like are expected from idempotent
+    // migrations; they are not worth a log line each.
+    onnotice: () => {},
     // `true` verifies the certificate; hosted Postgres presents a valid one.
     // Unencrypted local Docker has no certificate to verify.
     ssl: resolved.local ? false : true,

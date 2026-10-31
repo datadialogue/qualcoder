@@ -60,6 +60,26 @@ coder used it and the other never did.
 
 ## Local setup
 
+### Trying it out on dummy data
+
+```bash
+npm install
+npm run dev:local
+```
+
+That one command needs only Docker running. It starts a Postgres container of its own
+(`qualcode-local`, port 55434), fills it the first time with the Reddit example study — a lead, two
+coders, a finished pilot round, an open second round, a couple of near-duplicate codes and a merge
+proposal waiting for a vote — and starts the app. It prints a fixed invite link per person
+(`/join/local-lead`, `/join/local-ana`, `/join/local-ben`); use a separate browser or private window
+for each. It ignores `.env.local` entirely, so your real database is never touched.
+
+`npm run dev:local -- --reset` throws the dummy data away and seeds it afresh. Other arguments go to
+`next dev` (`npm run dev:local -- -p 3001`). Set `LOCAL_DATABASE_URL` to a localhost Postgres to use
+that instead of Docker.
+
+### Setting up your own database
+
 ```bash
 # 1. Postgres. Anything Postgres 13+ works; Docker is just convenient.
 docker run -d --name qualcode-pg \
@@ -292,6 +312,7 @@ tests/                irr, reliability, sampling, spans, starter files, codebook
 | | |
 | --- | --- |
 | `npm run dev` | development server |
+| `npm run dev:local` | development server on a throwaway local database with dummy data; `-- --reset` re-seeds |
 | `npm test` | reliability, sampling, span-rendering and import tests |
 | `npm run db:migrate` | apply pending migrations |
 | `npm run db:reset -- --yes` | drop everything and rebuild — deletes all coding |

@@ -110,9 +110,10 @@ export async function setCodeArchived(_prev: ActionResult, fd: FormData): Promis
   const denied = await leadGuard();
   if (denied) return denied;
   const { studyId, path } = studyOf(fd);
+  // A merged code stays archived: its annotations now live on the code it became.
   await sql`
     UPDATE codes SET archived = ${str(fd, "archived") === "true"}, updated_at = now()
-    WHERE id = ${str(fd, "id")} AND study_id = ${studyId}
+    WHERE id = ${str(fd, "id")} AND study_id = ${studyId} AND merged_into IS NULL
   `;
   revalidatePath(path);
   return null;
@@ -130,6 +131,13 @@ export async function deleteCode(_prev: ActionResult, fd: FormData): Promise<Act
     return {
       error: `That code is used by ${n} annotation(s). Archive it instead so existing coding stays intact.`,
     };
+  }
+  const [{ merges }] = await sql<{ merges: number }[]>`
+    SELECT (SELECT count(*)::int FROM code_merge_codes WHERE code_id = ${id})
+         + (SELECT count(*)::int FROM codes WHERE merged_into = ${id}) AS merges
+  `;
+  if (merges > 0) {
+    return { error: "That code is part of a merge proposal or merge history. Archive it instead." };
   }
   await sql`DELETE FROM codes WHERE id = ${id} AND study_id = ${studyId}`;
   revalidatePath(path);

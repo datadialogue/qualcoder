@@ -34,7 +34,7 @@ export default async function AnalysisIndexPage({
         sql<{ id: string; name: string; theme_name: string | null }[]>`
           SELECT c.id, c.name, t.name AS theme_name
           FROM codes c LEFT JOIN themes t ON t.id = c.theme_id
-          WHERE c.study_id = ${studyId} ORDER BY c.position
+          WHERE c.study_id = ${studyId} AND c.merged_into IS NULL ORDER BY c.position
         `,
         sql<AnnotationRow[]>`
           SELECT unit_id, coder_id, code_id, start_offset, end_offset

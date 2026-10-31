@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
+    "dev:local": "node --import tsx scripts/dev-local.ts",
     "build": "next build",
     "start": "next start",
     "db:migrate": "node --import tsx scripts/migrate.ts",

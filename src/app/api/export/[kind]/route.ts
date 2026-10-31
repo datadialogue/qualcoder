@@ -61,6 +61,7 @@ export async function GET(
                u.text         AS unit_text,
                t.name         AS theme,
                c.name         AS code,
+               oc.name        AS original_code,
                CASE WHEN a.start_offset IS NULL THEN 'unit' ELSE 'span' END AS scope,
                a.start_offset,
                a.end_offset,
@@ -73,6 +74,7 @@ export async function GET(
         JOIN coders co ON co.id = a.coder_id
         JOIN units u ON u.id = a.unit_id
         JOIN codes c ON c.id = a.code_id
+        LEFT JOIN codes oc ON oc.id = a.original_code_id
         LEFT JOIN themes t ON t.id = c.theme_id
         WHERE r.study_id = ${studyId} AND ${scoped ? sql`a.round_id = ${scoped}` : sql`true`}
         ORDER BY r.number, co.name, u.external_id, a.start_offset NULLS FIRST
@@ -82,7 +84,7 @@ export async function GET(
       ].sort();
       const base = [
         "round_number", "round_name", "coder", "unit_id", "unit_text", "theme", "code",
-        "scope", "start_offset", "end_offset", "quote", "memo", "created_at",
+        "original_code", "scope", "start_offset", "end_offset", "quote", "memo", "created_at",
       ];
       const flat = rows.map((r) => {
         const meta = (r.meta ?? {}) as Record<string, string>;
@@ -101,7 +103,8 @@ export async function GET(
       // "judged not to apply" rather than "not looked at".
       const [codes, cells] = await Promise.all([
         sql<{ id: string; name: string }[]>`
-          SELECT id, name FROM codes WHERE study_id = ${studyId} ORDER BY position, name
+          SELECT id, name FROM codes
+          WHERE study_id = ${studyId} AND merged_into IS NULL ORDER BY position, name
         `,
         sql<
           Array<{
@@ -163,16 +166,21 @@ export async function GET(
     case "codebook": {
       const rows = await sql<Record<string, unknown>[]>`
         SELECT t.name AS theme, c.name AS code, c.definition, c.inclusion, c.exclusion,
-               c.example, c.color, c.archived, c.created_at, c.updated_at,
-               (SELECT count(*)::int FROM annotations a WHERE a.code_id = c.id) AS times_applied
+               c.example, c.color, c.archived, m.name AS merged_into, c.merged_at,
+               c.created_at, c.updated_at,
+               (SELECT count(*)::int FROM annotations a WHERE a.code_id = c.id) AS times_applied,
+               (SELECT count(*)::int FROM annotations a WHERE a.original_code_id = c.id)
+                 AS times_originally_applied
         FROM codes c LEFT JOIN themes t ON t.id = c.theme_id
+        LEFT JOIN codes m ON m.id = c.merged_into
         WHERE c.study_id = ${studyId}
         ORDER BY t.position NULLS LAST, c.position
       `;
       return csvResponse(
         `codebook-${prefix}.csv`,
         ["theme", "code", "definition", "inclusion", "exclusion", "example", "color",
-         "archived", "times_applied", "created_at", "updated_at"],
+         "archived", "merged_into", "merged_at", "times_applied", "times_originally_applied",
+         "created_at", "updated_at"],
         rows,
       );
     }
@@ -214,7 +222,7 @@ export async function GET(
           sql<{ id: string; name: string; theme_name: string | null }[]>`
             SELECT c.id, c.name, t.name AS theme_name
             FROM codes c LEFT JOIN themes t ON t.id = c.theme_id
-            WHERE c.study_id = ${studyId} ORDER BY c.position
+            WHERE c.study_id = ${studyId} AND c.merged_into IS NULL ORDER BY c.position
           `,
           sql<AnnotationRow[]>`
             SELECT unit_id, coder_id, code_id, start_offset, end_offset
@@ -271,7 +279,7 @@ export async function GET(
     case "adjudicated": {
       const rows = await sql<Record<string, unknown>[]>`
         SELECT r.number AS round_number, u.external_id AS unit_id, u.text AS unit_text,
-               t.name AS theme, c.name AS code,
+               t.name AS theme, c.name AS code, oc.name AS original_code,
                CASE WHEN aa.start_offset IS NULL THEN 'unit' ELSE 'span' END AS scope,
                aa.start_offset, aa.end_offset, aa.quote,
                adj.status AS adjudication_status, adj.note, res.name AS resolved_by,
@@ -280,6 +288,7 @@ export async function GET(
         JOIN rounds r ON r.id = aa.round_id
         JOIN units u ON u.id = aa.unit_id
         JOIN codes c ON c.id = aa.code_id
+        LEFT JOIN codes oc ON oc.id = aa.original_code_id
         LEFT JOIN themes t ON t.id = c.theme_id
         LEFT JOIN adjudications adj
                ON adj.round_id = aa.round_id AND adj.unit_id = aa.unit_id
@@ -289,7 +298,7 @@ export async function GET(
       `;
       return csvResponse(
         `adjudicated-${suffix}.csv`,
-        ["round_number", "unit_id", "unit_text", "theme", "code", "scope", "start_offset",
+        ["round_number", "unit_id", "unit_text", "theme", "code", "original_code", "scope", "start_offset",
          "end_offset", "quote", "adjudication_status", "note", "resolved_by", "updated_at"],
         rows,
       );
@@ -300,7 +309,8 @@ export async function GET(
       // Complete archival dump of this study, enough to reproduce every table.
       const inStudy = sql`round_id IN (SELECT id FROM rounds WHERE study_id = ${studyId})`;
       const [units, themes, codes, coders, rounds, roundUnits, assignments,
-             unitAssignments, annotations, progress, adjudications, adjudicated] =
+             unitAssignments, annotations, progress, adjudications, adjudicated,
+             merges, mergeCodes, mergeVotes, mergeFolded] =
         await Promise.all([
           sql`SELECT id, external_id, text, meta, context FROM units
               WHERE study_id = ${studyId} ORDER BY external_id`,
@@ -318,6 +328,13 @@ export async function GET(
           sql`SELECT * FROM unit_progress WHERE ${inStudy}`,
           sql`SELECT * FROM adjudications WHERE ${inStudy}`,
           sql`SELECT * FROM adjudicated_annotations WHERE ${inStudy}`,
+          sql`SELECT * FROM code_merges WHERE study_id = ${studyId} ORDER BY created_at`,
+          sql`SELECT * FROM code_merge_codes
+              WHERE merge_id IN (SELECT id FROM code_merges WHERE study_id = ${studyId})`,
+          sql`SELECT * FROM code_merge_votes
+              WHERE merge_id IN (SELECT id FROM code_merges WHERE study_id = ${studyId})`,
+          sql`SELECT * FROM code_merge_folded
+              WHERE merge_id IN (SELECT id FROM code_merges WHERE study_id = ${studyId})`,
         ]);
 
       const body = JSON.stringify(
@@ -328,7 +345,9 @@ export async function GET(
             "Complete study dump. Invite tokens are deliberately omitted. " +
             "unit_progress is required to interpret annotations: a unit absent " +
             "from it was never finished by that coder, and is missing data " +
-            "rather than an absence of codes.",
+            "rather than an absence of codes. When codes were merged, " +
+            "annotations.original_code_id names the code the coder chose and " +
+            "code_merge_folded holds duplicates folded away by a merge.",
           units, themes, codes, coders, rounds,
           round_units: roundUnits,
           assignments,
@@ -337,6 +356,10 @@ export async function GET(
           unit_progress: progress,
           adjudications,
           adjudicated_annotations: adjudicated,
+          code_merges: merges,
+          code_merge_codes: mergeCodes,
+          code_merge_votes: mergeVotes,
+          code_merge_folded: mergeFolded,
         },
         null,
         2,

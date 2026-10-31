@@ -33,7 +33,7 @@ export default async function AnalysisPage({
     sql<{ id: string; name: string; theme_name: string | null; color: string }[]>`
       SELECT DISTINCT c.id, c.name, t.name AS theme_name, c.color
       FROM codes c LEFT JOIN themes t ON t.id = c.theme_id
-      WHERE c.study_id = ${studyId}
+      WHERE c.study_id = ${studyId} AND c.merged_into IS NULL
       ORDER BY t.name NULLS LAST, c.name
     `,
     sql<AnnotationRow[]>`

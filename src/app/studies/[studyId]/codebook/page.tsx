@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { currentCoder } from "@/lib/auth";
 import { getCodebook } from "@/lib/queries";
 import { sql } from "@/lib/db";
@@ -27,10 +28,13 @@ export default async function CodebookPage({
   if (!coder) return <SignedOut />;
 
   const isLead = coder.role === "lead";
-  const [themes, archived, usage, authors] = await Promise.all([
+  const [themes, archived, usage, authors, merged, pending] = await Promise.all([
     getCodebook(studyId),
+    // Merged codes are archived too, but restoring one would split it back off
+    // with no annotations; they are shown as provenance on the code they became.
     sql<{ id: string; name: string }[]>`
-      SELECT id, name FROM codes WHERE study_id = ${studyId} AND archived = true ORDER BY name
+      SELECT id, name FROM codes
+      WHERE study_id = ${studyId} AND archived = true AND merged_into IS NULL ORDER BY name
     `,
     sql<{ code_id: string; n: number }[]>`
       SELECT a.code_id, count(*)::int AS n
@@ -42,9 +46,22 @@ export default async function CodebookPage({
       SELECT c.id, co.name FROM codes c JOIN coders co ON co.id = c.created_by
       WHERE c.study_id = ${studyId}
     `,
+    sql<{ id: string; name: string; merged_into: string }[]>`
+      SELECT id, name, merged_into FROM codes
+      WHERE study_id = ${studyId} AND merged_into IS NOT NULL ORDER BY merged_at, name
+    `,
+    sql<{ n: number; mine: number }[]>`
+      SELECT count(*)::int AS n,
+             count(*) FILTER (WHERE NOT EXISTS (
+               SELECT 1 FROM code_merge_votes v WHERE v.merge_id = m.id AND v.coder_id = ${coder.id}
+             ))::int AS mine
+      FROM code_merges m WHERE m.study_id = ${studyId} AND m.status = 'proposed'
+    `,
   ]);
   const useCount = new Map(usage.map((u) => [u.code_id, u.n]));
   const authorOf = new Map(authors.map((a) => [a.id, a.name]));
+  const mergedFrom = new Map<string, string[]>();
+  for (const m of merged) mergedFrom.set(m.merged_into, [...(mergedFrom.get(m.merged_into) ?? []), m.name]);
   const provisional = themes.flatMap((t) => t.codes).filter((c) => c.provisional);
   const allThemes = themes.filter((t) => t.id !== "__unfiled__");
   const totalCodes = themes.reduce((n, t) => n + t.codes.length, 0);
@@ -52,13 +69,29 @@ export default async function CodebookPage({
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
       <header className="mb-6">
-        <h1 className="text-xl font-semibold tracking-tight">Codebook</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl font-semibold tracking-tight">Codebook</h1>
+          <Link href={`/studies/${studyId}/codebook/merges`} className="btn text-[12px] ml-auto">
+            Merge codes
+          </Link>
+        </div>
         <p className="muted text-[13px] mt-1 max-w-2xl">
           {totalCodes} active code{totalCodes === 1 ? "" : "s"} across {allThemes.length} theme
           {allThemes.length === 1 ? "" : "s"}. Codes stay editable between rounds; each round
           stores a snapshot of the codebook as it stood when the round closed.
         </p>
       </header>
+
+      {pending[0].n > 0 && (
+        <Link
+          href={`/studies/${studyId}/codebook/merges`}
+          className="panel px-3 py-2 text-[13px] mb-6 block"
+          style={{ borderColor: "var(--warn)" }}
+        >
+          {pending[0].n} merge proposal{pending[0].n === 1 ? " is" : "s are"} waiting for agreement
+          {pending[0].mine > 0 && ` — ${pending[0].mine} need${pending[0].mine === 1 ? "s" : ""} your vote`} →
+        </Link>
+      )}
 
       {!isLead && (
         <p className="panel px-3 py-2 text-[13px] muted mb-6">
@@ -73,7 +106,8 @@ export default async function CodebookPage({
           </h2>
           <p className="muted text-[13px] mb-3 max-w-2xl">
             Coders can add a code when none of the existing ones fit. Review these before the next
-            round: give them a definition, file them under a theme, merge duplicates, then keep or
+            round: give them a definition, file them under a theme,{" "}
+            <Link href={`/studies/${studyId}/codebook/merges`}>merge duplicates</Link>, then keep or
             archive each one.
           </p>
           <ul className="flex flex-wrap gap-2">
@@ -198,7 +232,21 @@ export default async function CodebookPage({
                         <span className="muted text-[12px] truncate flex-1">
                           {code.definition || <em className="faint">no definition yet</em>}
                         </span>
-                        <span className="chip num shrink-0">{used} uses</span>
+                        {mergedFrom.has(code.id) && (
+                          <span
+                            className="faint text-[12px] shrink truncate max-w-[40%]"
+                            title={`Merged from ${mergedFrom.get(code.id)!.join(", ")}`}
+                          >
+                            merged from {mergedFrom.get(code.id)!.join(", ")}
+                          </span>
+                        )}
+                        <Link
+                          href={`/studies/${studyId}/codebook/${code.id}`}
+                          className="chip num shrink-0"
+                          title="See the posts coded with this code"
+                        >
+                          {used} uses →
+                        </Link>
                       </summary>
 
                       {isLead ? (

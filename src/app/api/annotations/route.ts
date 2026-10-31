@@ -39,8 +39,12 @@ export async function POST(request: Request) {
   if (denied) return Response.json({ error: denied }, { status: 403 });
 
   // Each study has its own codebook; a code from another study cannot be applied.
-  const code = await sql<{ id: string }[]>`
-    SELECT c.id FROM codes c JOIN rounds r ON r.study_id = c.study_id
+  // A page loaded before a merge may still offer a merged-away code: apply the
+  // code it became, and remember which one the coder picked.
+  const code = await sql<{ id: string; picked: string | null }[]>`
+    SELECT COALESCE(c.merged_into, c.id) AS id,
+           CASE WHEN c.merged_into IS NULL THEN NULL ELSE c.id END AS picked
+    FROM codes c JOIN rounds r ON r.study_id = c.study_id
     WHERE c.id = ${codeId} AND r.id = ${roundId}
   `;
   if (code.length === 0) {
@@ -77,8 +81,10 @@ export async function POST(request: Request) {
       memo: string;
     }>
   >`
-    INSERT INTO annotations (round_id, unit_id, coder_id, code_id, start_offset, end_offset, quote)
-    VALUES (${roundId}, ${unitId}, ${auth.coder.id}, ${codeId}, ${start}, ${end}, ${quote})
+    INSERT INTO annotations (round_id, unit_id, coder_id, code_id, start_offset, end_offset, quote,
+                             original_code_id)
+    VALUES (${roundId}, ${unitId}, ${auth.coder.id}, ${code[0].id}, ${start}, ${end}, ${quote},
+            ${code[0].picked})
     ON CONFLICT (round_id, unit_id, coder_id, code_id, COALESCE(start_offset, -1), COALESCE(end_offset, -1))
     DO UPDATE SET updated_at = now()
     RETURNING id, unit_id, code_id, start_offset, end_offset, quote, memo

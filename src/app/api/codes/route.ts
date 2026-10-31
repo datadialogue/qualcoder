@@ -8,8 +8,8 @@ import { pickColor } from "@/lib/palette";
  * Any coder may do this: needing a code that does not exist yet is a normal
  * part of open coding, and forcing people to stop and ask the lead pushes them
  * towards misapplying an existing code instead. Codes made this way are marked
- * `provisional` and attributed to their author so the lead can review, rename
- * or merge them before the next round.
+ * `provisional` and attributed to their author so the lead can review or
+ * rename them, and the team can merge them, before the next round.
  *
  * The code joins the codebook of the round's study, and only a coder on that
  * round may add one.
@@ -51,19 +51,46 @@ export async function POST(request: Request) {
 
   // An existing name is not an error worth stopping for: hand back the code
   // that already exists so the caller can simply apply it.
+  // A code merged into another resolves to the code it became, so typing an
+  // old name lands on the agreed code rather than reviving the old one.
   const existing = await sql<
-    Array<{ id: string; name: string; color: string; definition: string; theme_id: string | null; archived: boolean }>
+    Array<{
+      id: string;
+      name: string;
+      color: string;
+      definition: string;
+      theme_id: string | null;
+      archived: boolean;
+      merged_name: string | null;
+    }>
   >`
-    SELECT id, name, color, definition, theme_id, archived
-    FROM codes WHERE study_id = ${studyId} AND lower(name) = lower(${name})
+    SELECT COALESCE(m.id, c.id) AS id, COALESCE(m.name, c.name) AS name,
+           COALESCE(m.color, c.color) AS color, COALESCE(m.definition, c.definition) AS definition,
+           CASE WHEN m.id IS NULL THEN c.theme_id ELSE m.theme_id END AS theme_id,
+           COALESCE(m.archived, c.archived) AS archived,
+           CASE WHEN m.id IS NULL THEN NULL ELSE c.name END AS merged_name
+    FROM codes c LEFT JOIN codes m ON m.id = c.merged_into
+    WHERE c.study_id = ${studyId} AND lower(c.name) = lower(${name})
+    ORDER BY (c.merged_into IS NULL) DESC
   `;
   if (existing.length > 0) {
     const code = existing[0];
+    if (code.merged_name) {
+      if (code.archived) {
+        await sql`UPDATE codes SET archived = false, updated_at = now() WHERE id = ${code.id}`;
+      }
+      const { merged_name, ...rest } = code;
+      return Response.json({
+        code: { ...rest, archived: false, inclusion: "", exclusion: "", example: "" },
+        existed: true,
+        message: `"${merged_name}" was merged into "${code.name}", so that code was used.`,
+      });
+    }
     if (code.archived) {
       await sql`UPDATE codes SET archived = false, updated_at = now() WHERE id = ${code.id}`;
     }
     return Response.json({
-      code: { ...code, archived: false, inclusion: "", exclusion: "", example: "" },
+      code: { ...code, merged_name: undefined, archived: false, inclusion: "", exclusion: "", example: "" },
       existed: true,
       message: code.archived
         ? `"${code.name}" already existed and was archived; it has been restored.`
