@@ -255,6 +255,69 @@ export async function addCoders(_prev: ActionResult, fd: FormData): Promise<Acti
   return { ok: `Added ${coderIds.length} coder(s).` };
 }
 
+/**
+ * Takes a coder off a round along with all of their coding in it. Their work
+ * has to go too: reliability only counts assigned coders but the exports read
+ * annotations directly, so leftovers would show up in one and not the other.
+ */
+export async function removeCoder(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
+  const denied = await leadGuard();
+  if (denied) return denied;
+  const roundId = str(fd, "id");
+  const coderId = str(fd, "coder_id");
+  if (!coderId) return { error: "Pick a coder to remove." };
+
+  const round = (await sql<{ status: string; overlap_mode: string }[]>`
+    SELECT status, overlap_mode FROM rounds WHERE id = ${roundId}
+  `)[0];
+  if (!round) return { error: "Round not found." };
+  if (round.status === "closed") {
+    return { error: "This round is closed, so its record is frozen. Reopen it first." };
+  }
+
+  const coder = (await sql<{ name: string; annotations: number; done: number }[]>`
+    SELECT c.name,
+           (SELECT count(*)::int FROM annotations an
+             WHERE an.round_id = ${roundId} AND an.coder_id = c.id) AS annotations,
+           (SELECT count(*)::int FROM unit_progress up
+             WHERE up.round_id = ${roundId} AND up.coder_id = c.id AND up.status = 'done') AS done
+    FROM assignments a JOIN coders c ON c.id = a.coder_id
+    WHERE a.round_id = ${roundId} AND a.coder_id = ${coderId}
+  `)[0];
+  if (!coder) return { error: "That coder is not on this round." };
+  if ((coder.annotations > 0 || coder.done > 0) && str(fd, "confirm") !== "remove") {
+    return {
+      error:
+        `${coder.name} has ${coder.annotations} annotation(s) and ${coder.done} finished ` +
+        `unit(s) in this round, which will be deleted. Type "remove" to confirm.`,
+    };
+  }
+
+  let orphaned = 0;
+  await sql.begin(async (tx) => {
+    await tx`DELETE FROM annotations WHERE round_id = ${roundId} AND coder_id = ${coderId}`;
+    await tx`DELETE FROM unit_progress WHERE round_id = ${roundId} AND coder_id = ${coderId}`;
+    await tx`DELETE FROM unit_assignments WHERE round_id = ${roundId} AND coder_id = ${coderId}`;
+    await tx`DELETE FROM assignments WHERE round_id = ${roundId} AND coder_id = ${coderId}`;
+    if (round.overlap_mode !== "full") {
+      [{ n: orphaned }] = await tx<{ n: number }[]>`
+        SELECT count(*)::int AS n FROM round_units ru
+        WHERE ru.round_id = ${roundId}
+          AND NOT EXISTS (SELECT 1 FROM unit_assignments ua
+                          WHERE ua.round_id = ru.round_id AND ua.unit_id = ru.unit_id)
+      `;
+    }
+  });
+
+  revalidatePath("/");
+  revalidatePath("/studies/[studyId]", "layout");
+  return {
+    ok:
+      `Removed ${coder.name} from the round.` +
+      (orphaned > 0 ? ` ${orphaned} unit(s) in this round now have no coder.` : ""),
+  };
+}
+
 export async function deleteRound(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
   const denied = await leadGuard();
   if (denied) return denied;

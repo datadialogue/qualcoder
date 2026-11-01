@@ -6,7 +6,7 @@ import { getCoders, getRoundProgress, getStudyRound } from "@/lib/queries";
 import { SignedOut } from "@/components/SignedOut";
 import { ActionForm } from "@/components/ActionForm";
 import { ProgressBar, StatusChip } from "@/components/Progress";
-import { addCoders, deleteRound, renameRound, setRoundStatus } from "../actions";
+import { addCoders, deleteRound, removeCoder, renameRound, setRoundStatus } from "../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -220,6 +220,45 @@ export default async function RoundDetailPage({
                   ))}
                 </div>
               </ActionForm>
+            )}
+
+            {progress.length > 0 && (
+              <div className="mt-4 pt-3 border-t" style={{ borderColor: "var(--border)" }}>
+                <h3 className="text-[13px] font-semibold mb-2">Remove a coder</h3>
+                {round.status === "closed" ? (
+                  <p className="faint text-[12px]">
+                    This round is closed, so its coders are fixed. Reopen it to remove someone.
+                  </p>
+                ) : (
+                  <ActionForm
+                    action={removeCoder}
+                    className="space-y-2"
+                    submitLabel="Remove from round"
+                    submitClassName="btn btn-danger"
+                    confirm="Remove this coder and delete their coding in this round? This cannot be undone."
+                  >
+                    <input type="hidden" name="id" value={id} />
+                    <select className="select" name="coder_id" defaultValue="">
+                      <option value="" disabled>
+                        Choose a coder…
+                      </option>
+                      {progress.map((p) => (
+                        <option key={p.coder_id} value={p.coder_id}>
+                          {p.name} · {p.done}/{p.assigned} done, {p.annotations} ann.
+                        </option>
+                      ))}
+                    </select>
+                    <p className="faint text-[12px]">
+                      Deletes their annotations and progress in this round; other rounds are
+                      untouched. Export first if you may need it. Type <code>remove</code> to
+                      confirm if they have already coded.
+                      {round.overlap_mode !== "full" &&
+                        " In this partial-overlap round, units only they were assigned will be left without a coder."}
+                    </p>
+                    <input className="input" name="confirm" placeholder="remove" autoComplete="off" />
+                  </ActionForm>
+                )}
+              </div>
             )}
 
             <div className="mt-4 pt-3 border-t" style={{ borderColor: "var(--border)" }}>
